@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, existsSync, copyFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createAI } from './ai.js';
 import { createAuth } from './auth.js';
 import { t } from './i18n.js';
@@ -15,10 +16,10 @@ if (args.includes('--init')) {
   const cwd = process.cwd();
   const agentSrc = existsSync(resolve(cwd, 'AGENTS.md'))
     ? resolve(cwd, 'AGENTS.md')
-    : resolve(new URL('../AGENTS.md', import.meta.url).pathname);
+    : fileURLToPath(new URL('../AGENTS.md', import.meta.url));
   const envSrc = existsSync(resolve(cwd, '.env.example'))
     ? resolve(cwd, '.env.example')
-    : resolve(new URL('../.env.example', import.meta.url).pathname);
+    : fileURLToPath(new URL('../.env.example', import.meta.url));
 
   const targetAgent = resolve(cwd, 'AGENTS.md');
   const targetEnv = resolve(cwd, '.env');
@@ -67,7 +68,7 @@ function requireEnv(name: string): string {
 function loadSystemPrompt(): string {
   const candidates = [
     resolve(process.cwd(), 'AGENTS.md'),
-    resolve(new URL('../AGENTS.md', import.meta.url).pathname),
+    fileURLToPath(new URL('../AGENTS.md', import.meta.url)),
   ];
   for (const p of candidates) {
     if (existsSync(p)) return readFileSync(p, 'utf8').trim();
