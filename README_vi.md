@@ -37,7 +37,8 @@ AngelLily là một autonomous agent theo tinh thần tương tự OpenClaw hay 
 
 ## Yêu cầu
 
-- Node.js **>= 20.6.0** — bot nạp `.env` bằng cờ `--env-file` có sẵn, nên `process.env` được điền trực tiếp bởi Node (không cần gói dotenv)
+- Node.js **24 LTS (khuyên dùng)** — bot nạp `.env` bằng cờ `--env-file` có sẵn, nên `process.env` được điền trực tiếp bởi Node (không cần gói dotenv)
+- > ⚠️ **Chưa dùng Node.js 26+.** Node 26 đi kèm Undici 8, làm đổi dispatcher của `fetch` toàn cục và đã gây lỗi rep chậm / lệch thứ tự tin nhắn Telegram cho bot này. Hãy dùng Node 24 LTS cả trên Windows lẫn Termux.
 - Một endpoint LLM API tương thích OpenAI
 - Chỉ trên Windows: **PowerShell** (`pwsh.exe` hoặc `powershell.exe`) để có thể chạy lệnh
 

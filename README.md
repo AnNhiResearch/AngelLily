@@ -37,7 +37,8 @@ It is written in TypeScript and runs as a single, tiny Node.js process with only
 
 ## Requirements
 
-- Node.js **>= 20.6.0** — the bot loads `.env` through the built-in `--env-file` flag, so `process.env` is populated natively by Node itself (no dotenv package)
+- Node.js **24 LTS (recommended)** — the bot loads `.env` through the built-in `--env-file` flag, so `process.env` is populated natively by Node itself (no dotenv package)
+- > ⚠️ **Do not use Node.js 26+ yet.** Node 26 ships Undici 8, which changes the internal `fetch` dispatcher and is known to cause delayed/out-of-order Telegram replies in this bot. Use Node 24 LTS on both Windows and Termux.
 - An OpenAI-compatible LLM API endpoint
 - On Windows only: **PowerShell** (`pwsh.exe` or `powershell.exe`) so commands can be executed
 
