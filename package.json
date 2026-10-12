@@ -1,0 +1,29 @@
+{
+  "name": "angellily",
+  "version": "0.0.1",
+  "description": "A featherweight autonomous agent",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node --env-file=.env dist/main.js",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "agent",
+    "ai"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "openai": "^4.68.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  }
+}

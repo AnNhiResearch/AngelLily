@@ -1,0 +1,85 @@
+// Tiny string table for user-visible bot messages — no external dependency.
+// BOT_LANGUAGE selects the UI language: 'en' or 'vi' (default 'vi').
+// The LLM's conversation language is separate: it mirrors the user's language
+// via the system prompt, not this table.
+
+const VI = {
+  help: (chatId: number) =>
+    [
+      'Angel Lily — trợ lý AI siêu nhỏ gọn.',
+      '',
+      'Lệnh:',
+      '/start - hướng dẫn',
+      '/clear - xóa hội thoại (bắt đầu lại)',
+      '',
+      `Chat ID của bạn: ${chatId}`,
+    ].join('\n'),
+  alreadyOwned: 'Bot này đã có chủ nhân.',
+  otpSent: 'Mã OTP 6 số đã hiển thị trên terminal. Hãy gửi lại mã này trong 60 giây.',
+  verifyOk: 'Xác thực thành công! Bạn đã là chủ nhân của bot.',
+  verifyExpired: 'Mã đã hết hạn. Gõ /verify để nhận mã mới.',
+  verifyBlocked: 'Bạn đã nhập sai quá nhiều lần và bị đưa vào danh sách đen.',
+  verifyWrong: (attemptsLeft: number) =>
+    `Mã sai. Bạn còn ${attemptsLeft} lần thử trước khi bị chặn.`,
+  needVerify: 'Bot này chỉ dành cho một người dùng chủ duy nhất. Gõ /verify để bắt đầu xác thực.',
+  cleared: 'Đã xóa hội thoại. Bắt đầu lại từ đầu!',
+  approval: (command: string) => `Yêu cầu phê duyệt:\n> ${command}`,
+  toolApproval: (name: string, input: string) => `công cụ "${name}" với đầu vào:\n> ${input}`,
+  btnRun: 'Chạy',
+  btnCancel: 'Hủy',
+  running: 'Đang chạy...',
+  result: 'Kết quả:',
+  truncated: '... [rút gọn]',
+  approvalTimeout: '[Hết thời gian chờ] Người dùng không xác nhận.',
+  approvalCancelled: '[Đã hủy] Người dùng không cho phép chạy lệnh này.',
+  noTool: (name: string) => `Không có công cụ "${name}".`,
+  toolError: (message: string) => `Lỗi công cụ: ${message}`,
+  pluginError: (message: string) => `Lỗi plugin: ${message}`,
+  noResponse: '(không có phản hồi)',
+  errAuth: 'Lỗi xác thực API key. Kiểm tra cấu hình.',
+  errRate: 'Quá nhiều yêu cầu. Thử lại sau.',
+  errConn: 'Không kết nối được API. Kiểm tra BASE_URL.',
+  errGeneric: 'Có lỗi xảy ra khi xử lý tin nhắn.',
+};
+
+const EN: typeof VI = {
+  help: (chatId: number) =>
+    [
+      'Angel Lily — a tiny AI assistant.',
+      '',
+      'Commands:',
+      '/start - help',
+      '/clear - clear the conversation (start over)',
+      '',
+      `Your chat ID: ${chatId}`,
+    ].join('\n'),
+  alreadyOwned: 'This bot already has an owner.',
+  otpSent: 'A 6-digit OTP code is shown on the terminal. Send it back within 60 seconds.',
+  verifyOk: 'Verified! You are now the owner of this bot.',
+  verifyExpired: 'The code has expired. Type /verify to get a new one.',
+  verifyBlocked: 'Too many wrong attempts — you have been blacklisted.',
+  verifyWrong: (attemptsLeft: number) =>
+    `Wrong code. You have ${attemptsLeft} attempts left before being blocked.`,
+  needVerify: 'This bot is for a single owner only. Type /verify to start verification.',
+  cleared: 'Conversation cleared. Starting fresh!',
+  approval: (command: string) => `Approval requested:\n> ${command}`,
+  toolApproval: (name: string, input: string) => `tool "${name}" with input:\n> ${input}`,
+  btnRun: 'Run',
+  btnCancel: 'Cancel',
+  running: 'Running...',
+  result: 'Result:',
+  truncated: '... [truncated]',
+  approvalTimeout: '[Timed out] The user did not confirm.',
+  approvalCancelled: '[Cancelled] The user did not allow this command.',
+  noTool: (name: string) => `No tool named "${name}".`,
+  toolError: (message: string) => `Tool error: ${message}`,
+  pluginError: (message: string) => `Plugin error: ${message}`,
+  noResponse: '(no response)',
+  errAuth: 'API key authentication failed. Check your configuration.',
+  errRate: 'Too many requests. Try again later.',
+  errConn: 'Cannot reach the API. Check BASE_URL.',
+  errGeneric: 'Something went wrong while handling the message.',
+};
+
+export const t: typeof VI =
+  (process.env.BOT_LANGUAGE ?? 'vi').trim().toLowerCase().startsWith('en') ? EN : VI;
