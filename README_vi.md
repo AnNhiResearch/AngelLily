@@ -43,13 +43,46 @@ AngelLily là một autonomous agent theo tinh thần tương tự OpenClaw hay 
 
 ## Bắt đầu
 
-1. Cài dependencies:
+### Option A: npm (nhanh nhất)
+
+Cài đặt toàn cục và chạy từ thư mục dự án:
+
+```sh
+npm install -g @angellily/app
+npx @angellily/app
+```
+
+Hoặc chạy một lần không cần cài:
+
+```sh
+npx @angellily/app
+```
+
+Cả hai phương thức đều tự động tìm `AGENTS.md` / `.env` từ thư mục hiện tại. Tạo chúng trước:
+
+```sh
+# trong thư mục dự án
+npx @angellily/app --init
+```
+
+`--init` sao bản `AGENTS.md` và `.env.example` vào `.`. Sửa `.env`, thêm token, rồi chạy `npx @angellily/app`.
+
+### Option B: từ nguồn
+
+1. Clone:
+
+   ```sh
+   git clone https://github.com/AnNhiResearch/AngelLily.git
+   cd AngelLily
+   ```
+
+2. Cài dependencies:
 
    ```sh
    npm install
    ```
 
-2. Tạo file cấu hình:
+3. Tạo file cấu hình:
 
    ```sh
    cp .env.example .env
@@ -59,14 +92,14 @@ AngelLily là một autonomous agent theo tinh thần tương tự OpenClaw hay 
 
    Điền `TELEGRAM_BOT_TOKEN` (lấy từ [@BotFather](https://t.me/BotFather)) và `OPENAI_API_KEY`. Trỏ `OPENAI_BASE_URL` và `OPENAI_MODEL` tới nhà cung cấp bất kỳ nào tương thích OpenAI.
 
-3. Build và khởi chạy:
+4. Build và khởi chạy:
 
    ```sh
    npm run build
    npm start
    ```
 
-4. Ghép tài khoản Telegram: gửi `/verify` cho bot, đọc mã OTP 6 số trên terminal rồi gửi lại trong vòng 60 giây. Từ đây bạn là chủ bot — mọi người khác đều bị bỏ qua.
+5. Ghép tài khoản Telegram: gửi `/verify` cho bot, đọc mã OTP 6 số trên terminal rồi gửi lại trong vòng 60 giây. Từ đây bạn là chủ bot — mọi người khác đều bị bỏ qua.
 
 ## Cấu hình
 

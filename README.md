@@ -43,13 +43,46 @@ It is written in TypeScript and runs as a single, tiny Node.js process with only
 
 ## Getting Started
 
-1. Install dependencies:
+### Option A: npm (fastest)
+
+Install globally and run from your project directory:
+
+```sh
+npm install -g @angellily/app
+npx @angellily/app
+```
+
+Or as a one-off without installing:
+
+```sh
+npx @angellily/app
+```
+
+Either way, the app auto-discovers `AGENTS.md` / `.env` from the current directory. Create them first:
+
+```sh
+# in your project folder
+npx @angellily/app --init
+```
+
+`--init` copies the default `AGENTS.md` and `.env.example` into `.`. Edit `.env`, add your token, then run `npx @angellily/app`.
+
+### Option B: from source
+
+1. Clone:
+
+   ```sh
+   git clone https://github.com/AnNhiResearch/AngelLily.git
+   cd AngelLily
+   ```
+
+2. Install dependencies:
 
    ```sh
    npm install
    ```
 
-2. Create your configuration:
+3. Create your configuration:
 
    ```sh
    cp .env.example .env
@@ -59,14 +92,14 @@ It is written in TypeScript and runs as a single, tiny Node.js process with only
 
    Fill in `TELEGRAM_BOT_TOKEN` (from [@BotFather](https://t.me/BotFather)) and `OPENAI_API_KEY`. Point `OPENAI_BASE_URL` and `OPENAI_MODEL` at any OpenAI-compatible provider.
 
-3. Build and start:
+4. Build and start:
 
    ```sh
    npm run build
    npm start
    ```
 
-4. Pair your Telegram account: send `/verify` to the bot, read the 6-digit OTP from the terminal, and send it back within 60 seconds. You are now the owner — everyone else is ignored.
+5. Pair your Telegram account: send `/verify` to the bot, read the 6-digit OTP from the terminal, and send it back within 60 seconds. You are now the owner — everyone else is ignored.
 
 ## Configuration
 

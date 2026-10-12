@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+#!/usr/bin/env node
+import { readFileSync, existsSync, copyFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { createAI } from './ai.js';
 import { createAuth } from './auth.js';
 import { t } from './i18n.js';
@@ -6,23 +8,84 @@ import { loadPlugins } from './plugins.js';
 import { createShell } from './shell.js';
 import { startTelegram, type TelegramClient } from './telegram.js';
 
+// CLI flag handling
+const args = process.argv.slice(2);
+
+if (args.includes('--init')) {
+  const cwd = process.cwd();
+  const agentSrc = existsSync(resolve(cwd, 'AGENTS.md'))
+    ? resolve(cwd, 'AGENTS.md')
+    : resolve(new URL('../AGENTS.md', import.meta.url).pathname);
+  const envSrc = existsSync(resolve(cwd, '.env.example'))
+    ? resolve(cwd, '.env.example')
+    : resolve(new URL('../.env.example', import.meta.url).pathname);
+
+  const targetAgent = resolve(cwd, 'AGENTS.md');
+  const targetEnv = resolve(cwd, '.env');
+
+  if (!existsSync(targetAgent)) {
+    copyFileSync(agentSrc, targetAgent);
+    console.log(`Created ${targetAgent}`);
+  } else {
+    console.log(`${targetAgent} already exists — skipping.`);
+  }
+
+  if (!existsSync(targetEnv)) {
+    copyFileSync(envSrc, targetEnv);
+    console.log(`Created ${targetEnv} — edit it with your tokens, then run: npx @angellily/app`);
+  } else {
+    console.log(`${targetEnv} already exists — skipping.`);
+  }
+
+  console.log('Done. Edit .env, then start the bot.');
+  process.exit(0);
+}
+
+if (args.includes('--help') || args.includes('-h')) {
+  console.log('Usage: npx @angellily/app [options]');
+  console.log('');
+  console.log('Options:');
+  console.log('  --init     Copy AGENTS.md and .env.example into the current directory');
+  console.log('  --help     Show this help');
+  console.log('');
+  console.log('The bot auto-discovers AGENTS.md and .env from the current directory.');
+  process.exit(0);
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
     console.error(`Missing required environment variable: ${name}`);
+    console.error('Run `npx @angellily/app --init` first, or create .env manually.');
     process.exit(1);
   }
   return value;
 }
 
-// The bot's system prompt lives in AGENTS.md (project root) so the persona can
-// be edited without touching the code.
+// The bot's system prompt lives in AGENTS.md. Try CWD first (user's project),
+// fall back to the package root (dev mode).
 function loadSystemPrompt(): string {
-  try {
-    return readFileSync(new URL('../AGENTS.md', import.meta.url), 'utf8').trim();
-  } catch {
-    console.error("Missing AGENTS.md in the project root (the bot's system prompt).");
-    process.exit(1);
+  const candidates = [
+    resolve(process.cwd(), 'AGENTS.md'),
+    resolve(new URL('../AGENTS.md', import.meta.url).pathname),
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return readFileSync(p, 'utf8').trim();
+  }
+  console.error('Missing AGENTS.md (the bot\'s system prompt).');
+  console.error('Run `npx @angellily/app --init` to create one, or create AGENTS.md manually.');
+  process.exit(1);
+}
+
+// Auto-load .env from CWD if not already loaded (Node >= 20.6 has --env-file,
+// but npx doesn't pass it — read it manually as a fallback).
+if (!process.env.TELEGRAM_BOT_TOKEN && !process.env.OPENAI_API_KEY) {
+  const envPath = resolve(process.cwd(), '.env');
+  if (existsSync(envPath)) {
+    for (const line of readFileSync(envPath, 'utf8').split('\n')) {
+      const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
+      if (m) process.env[m[1]] = m[2];
+    }
   }
 }
 

@@ -1,21 +1,46 @@
 {
-  "name": "angellily",
+  "name": "@angellily/app",
   "version": "0.0.1",
-  "description": "A featherweight autonomous agent",
+  "description": "A featherweight autonomous Telegram agent (Angel Lily)",
   "type": "module",
   "main": "dist/main.js",
+  "bin": {
+    "angellily": "dist/main.js"
+  },
+  "files": [
+    "dist/",
+    "AGENTS.md",
+    "LICENSE",
+    "README.md",
+    "README_vi.md",
+    ".env.example"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node --env-file=.env dist/main.js",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "latest"
   },
   "keywords": [
     "telegram",
     "bot",
     "agent",
-    "ai"
+    "ai",
+    "llm"
   ],
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnNhiResearch/AngelLily.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AnNhiResearch/AngelLily/issues"
+  },
+  "homepage": "https://github.com/AnNhiResearch/AngelLily",
   "dependencies": {
     "openai": "^4.68.0"
   },
