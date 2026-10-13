@@ -20,11 +20,92 @@ export interface GatewayStore {
 
 export interface PluginContext {
   chatId: number;
+  locale: string;
   ai?: {
     setConfig(config: { apiKey?: string; baseURL?: string; model?: string }): void;
     getConfig(): { apiKey: string; baseURL?: string; model: string };
   };
 }
+
+// --------------- i18n ---------------
+
+const VI = {
+  descModel: 'Xem hoặc chuyển model AI trong nhà cung cấp hiện tại',
+  descGateway: 'Quản lý AI Gateway: nhà cung cấp, tài khoản, thêm cấu hình',
+  errNoProvider: (name: string) => `<b>Lỗi:</b> Không tìm thấy cấu hình cho nhà cung cấp <code>${name}</code>.`,
+  currentModel: 'Model hiện tại:',
+  provider: 'Nhà cung cấp:',
+  availableModels: 'Các model có sẵn:',
+  none: '(không có)',
+  switchHint: (cmd: string) => `Dùng <code>${cmd}</code> để chuyển.`,
+  switchedModel: (model: string) => `Đã chuyển sang model: <code>${model}</code>`,
+  providers: 'Nhà cung cấp:',
+  noProviders: 'Chưa cấu hình nhà cung cấp nào.',
+  active: '(đang dùng)',
+  accounts: 'Tài khoản:',
+  noAccounts: 'Không có tài khoản.',
+  providerNotFound: (name: string) => `Nhà cung cấp <code>${name}</code> không tồn tại. Dùng <code>/gateway providers</code> để xem danh sách.`,
+  switchedProvider: (name: string) => `Đã chuyển sang nhà cung cấp: <code>${name}</code>`,
+  account: 'Tài khoản:',
+  model: 'Model:',
+  accountsIn: (provider: string) => `Tài khoản trong [${provider}]:`,
+  usage: 'Cách dùng:',
+  accountNotFound: (account: string, provider: string) => `Tài khoản <code>${account}</code> không tồn tại trong nhà cung cấp <code>${provider}</code>.`,
+  switchedAccount: (account: string, provider: string) => `Đã chuyển sang tài khoản: <code>${account}</code> (Nhà cung cấp: <code>${provider}</code>)`,
+  addUsage: 'Cách dùng:',
+  example: 'Ví dụ:',
+  savedConfig: 'Đã lưu cấu hình mới:',
+  switchNow: (name: string) => `Chuyển ngay: <code>/gateway providers ${name}</code>`,
+  statusTitle: 'Trạng thái AI Gateway',
+  baseURL: 'Base URL:',
+  commands: 'Lệnh:',
+  cmdModelDesc: 'Xem hoặc chuyển model',
+  cmdProvidersDesc: 'Liệt kê hoặc chuyển nhà cung cấp',
+  cmdUseDesc: 'Chuyển tài khoản',
+  cmdAddDesc: 'Thêm nhà cung cấp / tài khoản',
+};
+
+const EN: typeof VI = {
+  descModel: 'View or switch the AI model within the current provider',
+  descGateway: 'Manage AI Gateway: providers, accounts, add config',
+  errNoProvider: (name: string) => `<b>Error:</b> No config found for provider <code>${name}</code>.`,
+  currentModel: 'Current model:',
+  provider: 'Provider:',
+  availableModels: 'Available models:',
+  none: '(none)',
+  switchHint: (cmd: string) => `Use <code>${cmd}</code> to switch.`,
+  switchedModel: (model: string) => `Switched to model: <code>${model}</code>`,
+  providers: 'Providers:',
+  noProviders: 'No providers configured.',
+  active: '(active)',
+  accounts: 'Accounts:',
+  noAccounts: 'No accounts.',
+  providerNotFound: (name: string) => `Provider <code>${name}</code> not found. Use <code>/gateway providers</code> to list.`,
+  switchedProvider: (name: string) => `Switched to provider: <code>${name}</code>`,
+  account: 'Account:',
+  model: 'Model:',
+  accountsIn: (provider: string) => `Accounts in [${provider}]:`,
+  usage: 'Usage:',
+  accountNotFound: (account: string, provider: string) => `Account <code>${account}</code> not found in provider <code>${provider}</code>.`,
+  switchedAccount: (account: string, provider: string) => `Switched to account: <code>${account}</code> (Provider: <code>${provider}</code>)`,
+  addUsage: 'Usage:',
+  example: 'Example:',
+  savedConfig: 'Saved new config:',
+  switchNow: (name: string) => `Switch now: <code>/gateway providers ${name}</code>`,
+  statusTitle: 'AI Gateway Status',
+  baseURL: 'Base URL:',
+  commands: 'Commands:',
+  cmdModelDesc: 'View or switch model',
+  cmdProvidersDesc: 'List or switch provider',
+  cmdUseDesc: 'Switch account',
+  cmdAddDesc: 'Add provider / account',
+};
+
+function i18n(locale: string): typeof VI {
+  return locale.startsWith('en') ? EN : VI;
+}
+
+// --------------- Store ---------------
 
 function getStorePath(): string {
   return resolve(process.cwd(), '.angellily', 'gateways.json');
@@ -84,6 +165,8 @@ function escapeHtml(str: string): string {
     .replace(/>/g, '&gt;');
 }
 
+// --------------- Plugin ---------------
+
 export default function createGatewayPlugin() {
   let store: GatewayStore | null = null;
 
@@ -112,27 +195,28 @@ export default function createGatewayPlugin() {
     commands: [
       {
         command: 'model',
-        description: 'View or switch the AI model within the current provider',
+        description: 'View or switch AI model',
         run: (args: string, ctx: PluginContext) => {
+          const L = i18n(ctx.locale);
           const s = ensureStore(ctx);
           const currentProvider = s.providers[s.activeProvider];
 
           if (!currentProvider) {
-            return `<b>Error:</b> No config found for provider <code>${escapeHtml(s.activeProvider)}</code>.`;
+            return L.errNoProvider(escapeHtml(s.activeProvider));
           }
 
           const targetModel = args.trim();
           if (!targetModel) {
             const list = currentProvider.models.map((m) => {
-              const active = m === s.activeModel ? ' <b>(active)</b>' : '';
-              return `• <code>${escapeHtml(m)}</code>${active}`;
+              const tag = m === s.activeModel ? ` <b>${L.active}</b>` : '';
+              return `• <code>${escapeHtml(m)}</code>${tag}`;
             });
             return (
-              `<b>Current model:</b> <code>${escapeHtml(s.activeModel)}</code>\n` +
-              `<b>Provider:</b> <code>${escapeHtml(s.activeProvider)}</code>\n\n` +
-              `<b>Available models:</b>\n` +
-              (list.length ? list.join('\n') : '<i>(none)</i>') +
-              `\n\n<i>Use <code>/model &lt;name&gt;</code> to switch.</i>`
+              `<b>${L.currentModel}</b> <code>${escapeHtml(s.activeModel)}</code>\n` +
+              `<b>${L.provider}</b> <code>${escapeHtml(s.activeProvider)}</code>\n\n` +
+              `<b>${L.availableModels}</b>\n` +
+              (list.length ? list.join('\n') : `<i>${L.none}</i>`) +
+              `\n\n<i>${L.switchHint('/model &lt;name&gt;')}</i>`
             );
           }
 
@@ -145,15 +229,16 @@ export default function createGatewayPlugin() {
           applyActiveConfig(ctx, s);
 
           return (
-            `Switched to model: <code>${escapeHtml(targetModel)}</code>\n` +
-            `Provider: <code>${escapeHtml(s.activeProvider)}</code>`
+            `${L.switchedModel(escapeHtml(targetModel))}\n` +
+            `${L.provider} <code>${escapeHtml(s.activeProvider)}</code>`
           );
         },
       },
       {
         command: 'gateway',
-        description: 'Manage AI Gateway: providers, accounts, add config',
+        description: 'Manage AI Gateway',
         run: (args: string, ctx: PluginContext) => {
+          const L = i18n(ctx.locale);
           const s = ensureStore(ctx);
           const parts = args.trim().split(/\s+/).filter(Boolean);
           const sub = parts[0]?.toLowerCase();
@@ -164,32 +249,30 @@ export default function createGatewayPlugin() {
             if (!targetProvider) {
               const pNames = Object.keys(s.providers);
               const list = pNames.map((name) => {
-                const isCurrent = name === s.activeProvider ? ' <b>(active)</b>' : '';
+                const isCurrent = name === s.activeProvider ? ` <b>${L.active}</b>` : '';
                 const p = s.providers[name];
                 const accs = Object.keys(p.accounts).join(', ');
-                return `• <code>${escapeHtml(name)}</code>${isCurrent}\n  URL: <code>${escapeHtml(p.baseURL ?? 'default')}</code>\n  Accounts: ${escapeHtml(accs || 'none')}`;
+                return `• <code>${escapeHtml(name)}</code>${isCurrent}\n  URL: <code>${escapeHtml(p.baseURL ?? 'default')}</code>\n  ${L.accounts} ${escapeHtml(accs || 'none')}`;
               });
 
               return (
-                `<b>Providers:</b>\n\n` +
-                (list.length ? list.join('\n\n') : '<i>No providers configured.</i>') +
-                `\n\n<i>Use <code>/gateway providers &lt;name&gt;</code> to switch.</i>`
+                `<b>${L.providers}</b>\n\n` +
+                (list.length ? list.join('\n\n') : `<i>${L.noProviders}</i>`) +
+                `\n\n<i>${L.switchHint('/gateway providers &lt;name&gt;')}</i>`
               );
             }
 
             // Switch provider
             const target = s.providers[targetProvider];
             if (!target) {
-              return `Provider <code>${escapeHtml(targetProvider)}</code> not found. Use <code>/gateway providers</code> to list.`;
+              return L.providerNotFound(escapeHtml(targetProvider));
             }
 
             s.activeProvider = targetProvider;
-            // Pick first account if current active doesn't exist in target provider
             if (!target.accounts[s.activeAccount]) {
               const firstAcc = Object.keys(target.accounts)[0] ?? 'default';
               s.activeAccount = firstAcc;
             }
-            // Pick first model if target provider models available
             if (target.models.length && !target.models.includes(s.activeModel)) {
               s.activeModel = target.models[0];
             }
@@ -197,9 +280,9 @@ export default function createGatewayPlugin() {
             applyActiveConfig(ctx, s);
 
             return (
-              `Switched to provider: <code>${escapeHtml(targetProvider)}</code>\n` +
-              `• Account: <code>${escapeHtml(s.activeAccount)}</code>\n` +
-              `• Model: <code>${escapeHtml(s.activeModel)}</code>`
+              `${L.switchedProvider(escapeHtml(targetProvider))}\n` +
+              `• ${L.account} <code>${escapeHtml(s.activeAccount)}</code>\n` +
+              `• ${L.model} <code>${escapeHtml(s.activeModel)}</code>`
             );
           }
 
@@ -210,26 +293,26 @@ export default function createGatewayPlugin() {
               const currentProvider = s.providers[s.activeProvider];
               const accs = currentProvider ? Object.keys(currentProvider.accounts) : [];
               const list = accs.map((a) => {
-                const active = a === s.activeAccount ? ' <b>(active)</b>' : '';
-                return `• <code>${escapeHtml(a)}</code>${active}`;
+                const tag = a === s.activeAccount ? ` <b>${L.active}</b>` : '';
+                return `• <code>${escapeHtml(a)}</code>${tag}`;
               });
               return (
-                `<b>Accounts in [${escapeHtml(s.activeProvider)}]:</b>\n\n` +
-                (list.length ? list.join('\n') : '<i>No accounts.</i>') +
-                `\n\n<i>Usage: <code>/gateway use &lt;account&gt;</code></i>`
+                `<b>${L.accountsIn(escapeHtml(s.activeProvider))}</b>\n\n` +
+                (list.length ? list.join('\n') : `<i>${L.noAccounts}</i>`) +
+                `\n\n<i>${L.usage} <code>/gateway use &lt;account&gt;</code></i>`
               );
             }
 
             const currentProvider = s.providers[s.activeProvider];
             if (!currentProvider || !currentProvider.accounts[targetAccount]) {
-              return `Account <code>${escapeHtml(targetAccount)}</code> not found in provider <code>${escapeHtml(s.activeProvider)}</code>.`;
+              return L.accountNotFound(escapeHtml(targetAccount), escapeHtml(s.activeProvider));
             }
 
             s.activeAccount = targetAccount;
             saveStore(s);
             applyActiveConfig(ctx, s);
 
-            return `Switched to account: <code>${escapeHtml(targetAccount)}</code> (Provider: <code>${escapeHtml(s.activeProvider)}</code>)`;
+            return L.switchedAccount(escapeHtml(targetAccount), escapeHtml(s.activeProvider));
           }
 
           // /gateway add <provider> <baseURL> <account> <apiKey> <model>
@@ -242,9 +325,9 @@ export default function createGatewayPlugin() {
 
             if (!providerName || !baseURL || !accountName || !apiKey || !modelName) {
               return (
-                `<b>Usage:</b>\n` +
+                `<b>${L.addUsage}</b>\n` +
                 `<code>/gateway add &lt;provider&gt; &lt;baseURL&gt; &lt;account&gt; &lt;apiKey&gt; &lt;model&gt;</code>\n\n` +
-                `<i>Example:</i>\n` +
+                `<i>${L.example}</i>\n` +
                 `<code>/gateway add groq https://api.groq.com/openai/v1 main gsk_xxxx llama-3.3-70b-versatile</code>`
               );
             }
@@ -267,27 +350,27 @@ export default function createGatewayPlugin() {
             saveStore(s);
 
             return (
-              `Saved new config:\n` +
-              `• Provider: <code>${escapeHtml(providerName)}</code>\n` +
-              `• Account: <code>${escapeHtml(accountName)}</code>\n` +
-              `• Model: <code>${escapeHtml(modelName)}</code>\n\n` +
-              `Switch now: <code>/gateway providers ${escapeHtml(providerName)}</code>`
+              `${L.savedConfig}\n` +
+              `• ${L.provider} <code>${escapeHtml(providerName)}</code>\n` +
+              `• ${L.account} <code>${escapeHtml(accountName)}</code>\n` +
+              `• ${L.model} <code>${escapeHtml(modelName)}</code>\n\n` +
+              L.switchNow(escapeHtml(providerName))
             );
           }
 
           // Default status display & help
           const currentP = s.providers[s.activeProvider];
           return (
-            `<b>AI Gateway Status</b>\n\n` +
-            `• <b>Provider:</b> <code>${escapeHtml(s.activeProvider)}</code>\n` +
-            `• <b>Account:</b> <code>${escapeHtml(s.activeAccount)}</code>\n` +
-            `• <b>Model:</b> <code>${escapeHtml(s.activeModel)}</code>\n` +
-            `• <b>Base URL:</b> <code>${escapeHtml(currentP?.baseURL ?? 'default')}</code>\n\n` +
-            `<b>Commands:</b>\n` +
-            `• <code>/model [name]</code> — View or switch model\n` +
-            `• <code>/gateway providers [name]</code> — List or switch provider\n` +
-            `• <code>/gateway use &lt;account&gt;</code> — Switch account\n` +
-            `• <code>/gateway add ...</code> — Add provider / account`
+            `<b>${L.statusTitle}</b>\n\n` +
+            `• <b>${L.provider}</b> <code>${escapeHtml(s.activeProvider)}</code>\n` +
+            `• <b>${L.account}</b> <code>${escapeHtml(s.activeAccount)}</code>\n` +
+            `• <b>${L.model}</b> <code>${escapeHtml(s.activeModel)}</code>\n` +
+            `• <b>${L.baseURL}</b> <code>${escapeHtml(currentP?.baseURL ?? 'default')}</code>\n\n` +
+            `<b>${L.commands}</b>\n` +
+            `• <code>/model [name]</code> — ${L.cmdModelDesc}\n` +
+            `• <code>/gateway providers [name]</code> — ${L.cmdProvidersDesc}\n` +
+            `• <code>/gateway use &lt;account&gt;</code> — ${L.cmdUseDesc}\n` +
+            `• <code>/gateway add ...</code> — ${L.cmdAddDesc}`
           );
         },
       },

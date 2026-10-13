@@ -98,6 +98,7 @@ const apiKey = requireEnv('OPENAI_API_KEY');
 
 const maxHistory = Number(process.env.MAX_HISTORY);
 
+const locale = (process.env.BOT_LANGUAGE ?? 'vi').trim().toLowerCase().startsWith('en') ? 'en' : 'vi';
 const shell = await createShell();
 const auth = createAuth();
 
@@ -155,7 +156,7 @@ const ai = createAI({
   extraSystem: plugins.systemPrompt() || undefined,
   runCommand: (sessionId, command) => {
     const chatId = Number(sessionId);
-    const finalCommand = plugins.applyShellCommand(command, { chatId });
+    const finalCommand = plugins.applyShellCommand(command, { chatId, locale });
     return telegram
       ? telegram.requestApproval(chatId, finalCommand)
       : Promise.resolve({ approved: false, output: '' });
@@ -167,6 +168,7 @@ const ai = createAI({
     if (!tool) return { approved: false, output: t.noTool(name) };
     const toolCtx = {
       chatId,
+      locale,
     };
     try {
       if (tool.approval) {
@@ -202,6 +204,7 @@ telegram = startTelegram({
     try {
       return await match.command.run(match.args, {
         chatId,
+        locale,
       });
     } catch (err) {
       console.error(`[plugins] command ${text} failed:`, err);
@@ -209,7 +212,7 @@ telegram = startTelegram({
     }
   },
   onText: (chatId, text, onPartial, onCommit) => {
-    const incoming = plugins.applyIncoming(text, { chatId });
+    const incoming = plugins.applyIncoming(text, { chatId, locale });
     if (incoming === null) {
       console.log(`[chat ${chatId}] a plugin swallowed the message`);
       return Promise.resolve('');
@@ -217,7 +220,7 @@ telegram = startTelegram({
     return ai.chat(
       String(chatId),
       incoming,
-      (t) => onPartial(plugins.applyOutgoing(t, { chatId })),
+      (t) => onPartial(plugins.applyOutgoing(t, { chatId, locale })),
       onCommit,
     );
   },

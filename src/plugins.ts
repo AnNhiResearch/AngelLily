@@ -19,6 +19,8 @@ import type {
 export interface PluginContext {
   /** Telegram chat id (the AI session id is the same value as a string). */
   chatId: number;
+  /** UI locale chosen by the bot owner (e.g. 'en', 'vi'). */
+  locale: string;
   /** Optional shell capability provided by host */
   shell?: {
     run(command: string): Promise<{ ok: boolean; output: string }>;
