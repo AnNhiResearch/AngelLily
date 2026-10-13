@@ -9,7 +9,7 @@
   },
   "files": [
     "dist/",
-    "AGENTS.md",
+    ".angellily/AGENTS.md",
     "LICENSE",
     "README.md",
     "README_vi.md",

@@ -14,7 +14,7 @@ export interface AIOptions {
   model?: string;
   /** Max messages kept per session (user + assistant). Default 20. */
   maxHistory?: number;
-  /** Base system prompt, usually loaded from AGENTS.md. */
+  /** Base system prompt, usually loaded from .angellily/AGENTS.md. */
   system?: string;
   /**
    * Optional shell tool. When set, the LLM may end a reply with
@@ -55,7 +55,7 @@ export interface AI {
   clear(sessionId: string): void;
 }
 
-// The persona and Telegram HTML rules live in AGENTS.md (loaded in main).
+// The persona and Telegram HTML rules live in .angellily/AGENTS.md (loaded in main).
 // The prompts below are the dynamic shell/tool protocol, kept in English:
 // models tend to follow instructions more reliably in English.
 

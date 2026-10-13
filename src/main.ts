@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, existsSync, copyFileSync } from 'node:fs';
+import { readFileSync, existsSync, copyFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAI } from './ai.js';
@@ -14,17 +14,20 @@ const args = process.argv.slice(2);
 
 if (args.includes('--init')) {
   const cwd = process.cwd();
-  const agentSrc = existsSync(resolve(cwd, 'AGENTS.md'))
-    ? resolve(cwd, 'AGENTS.md')
-    : fileURLToPath(new URL('../AGENTS.md', import.meta.url));
+  // The bot's prompt lives in .angellily/ so coding agents (which treat a
+  // root-level AGENTS.md as their own workspace rules) don't pick it up.
+  const agentSrc = existsSync(resolve(cwd, '.angellily', 'AGENTS.md'))
+    ? resolve(cwd, '.angellily', 'AGENTS.md')
+    : fileURLToPath(new URL('../.angellily/AGENTS.md', import.meta.url));
   const envSrc = existsSync(resolve(cwd, '.env.example'))
     ? resolve(cwd, '.env.example')
     : fileURLToPath(new URL('../.env.example', import.meta.url));
 
-  const targetAgent = resolve(cwd, 'AGENTS.md');
+  const targetAgent = resolve(cwd, '.angellily', 'AGENTS.md');
   const targetEnv = resolve(cwd, '.env');
 
   if (!existsSync(targetAgent)) {
+    mkdirSync(resolve(cwd, '.angellily'), { recursive: true });
     copyFileSync(agentSrc, targetAgent);
     console.log(`Created ${targetAgent}`);
   } else {
@@ -46,10 +49,10 @@ if (args.includes('--help') || args.includes('-h')) {
   console.log('Usage: npx @angellily/app [options]');
   console.log('');
   console.log('Options:');
-  console.log('  --init     Copy AGENTS.md and .env.example into the current directory');
+  console.log('  --init     Copy .angellily/AGENTS.md and .env.example into the current directory');
   console.log('  --help     Show this help');
   console.log('');
-  console.log('The bot auto-discovers AGENTS.md and .env from the current directory.');
+  console.log('The bot auto-discovers .angellily/AGENTS.md and .env from the current directory.');
   process.exit(0);
 }
 
@@ -63,18 +66,18 @@ function requireEnv(name: string): string {
   return value;
 }
 
-// The bot's system prompt lives in AGENTS.md. Try CWD first (user's project),
-// fall back to the package root (dev mode).
+// The bot's system prompt lives in .angellily/AGENTS.md. Try CWD first
+// (user's project), fall back to the package root (dev mode).
 function loadSystemPrompt(): string {
   const candidates = [
-    resolve(process.cwd(), 'AGENTS.md'),
-    fileURLToPath(new URL('../AGENTS.md', import.meta.url)),
+    resolve(process.cwd(), '.angellily', 'AGENTS.md'),
+    fileURLToPath(new URL('../.angellily/AGENTS.md', import.meta.url)),
   ];
   for (const p of candidates) {
     if (existsSync(p)) return readFileSync(p, 'utf8').trim();
   }
-  console.error('Missing AGENTS.md (the bot\'s system prompt).');
-  console.error('Run `npx @angellily/app --init` to create one, or create AGENTS.md manually.');
+  console.error('Missing .angellily/AGENTS.md (the bot\'s system prompt).');
+  console.error('Run `npx @angellily/app --init` to create one, or create .angellily/AGENTS.md manually.');
   process.exit(1);
 }
 

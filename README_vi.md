@@ -15,7 +15,7 @@ AngelLily là một autonomous agent theo tinh thần tương tự OpenClaw hay 
 - **Chạy lệnh phải có người duyệt.** AI có thể đề xuất chạy lệnh shell, nhưng mọi lệnh đều hiện trong Telegram dưới dạng **Chạy / Hủy** và chỉ được thực thi sau khi được duyệt tường minh. Hook của plugin có thể sửa lệnh *trước khi* hiển thị, nên bạn luôn duyệt đúng những gì sắp chạy.
 - **Chọn shell theo luật cố định.** PowerShell 7 → PowerShell 5.1 trên Windows (không bao giờ dùng `cmd.exe`), `/bin/sh` trên Termux, macOS và Linux. Môi trường được chọn được mô tả cho model để AI luôn viết lệnh đúng cú pháp — xem [docs/shell-selection_vi.md](docs/shell-selection_vi.md).
 - **Plugin bên ngoài, hoàn toàn tuỳ chọn.** Nạp thêm lệnh, công cụ cho LLM, prompt và hook từ các package npm, có thể cô lập trong worker thread — xem [docs/plugins_vi.md](docs/plugins_vi.md).
-- **Persona chỉnh được.** System prompt nằm trong [AGENTS.md](AGENTS.md). Sửa file, khởi động lại — không cần đụng code.
+- **Persona chỉnh được.** System prompt nằm trong [.angellily/AGENTS.md](.angellily/AGENTS.md). Sửa file, khởi động lại — không cần đụng code. File nằm trong thư mục `.angellily/` để các AI coding agent (Trae, Copilot,…) không nhầm nó thành luật workspace của chúng.
 - **Giao diện đa ngôn ngữ.** Các thông báo của bot (help, phê duyệt, lỗi) bằng tiếng Anh hoặc tiếng Việt qua `BOT_LANGUAGE`.
 - **Bộ nhớ chỉ trong phiên.** Ngữ cảnh hội thoại nằm trong RAM của phiên hiện tại và bị xóa khi khởi động lại — không phình to theo thời gian.
 
@@ -59,14 +59,14 @@ Hoặc chạy một lần không cần cài:
 npx @angellily/app
 ```
 
-Cả hai phương thức đều tự động tìm `AGENTS.md` / `.env` từ thư mục hiện tại. Tạo chúng trước:
+Cả hai phương thức đều tự động tìm `.angellily/AGENTS.md` / `.env` từ thư mục hiện tại. Tạo chúng trước:
 
 ```sh
 # trong thư mục dự án
 npx @angellily/app --init
 ```
 
-`--init` sao bản `AGENTS.md` và `.env.example` vào `.`. Sửa `.env`, thêm token, rồi chạy `npx @angellily/app`.
+`--init` sao bản `.angellily/AGENTS.md` và `.env.example` vào thư mục dự án. Sửa `.env`, thêm token, rồi chạy `npx @angellily/app`.
 
 ### Option B: từ nguồn
 
@@ -116,7 +116,7 @@ npx @angellily/app --init
 
 ## Tùy biến persona
 
-Danh tính và luật ứng xử của bot nằm trong [AGENTS.md](AGENTS.md) ở thư mục gốc. Sửa file, khởi động lại bot — xong. Model hiện tại được chèn tự động để agent trả lời được câu hỏi về thứ đang vận hành nó.
+Danh tính và luật ứng xử của bot nằm trong [.angellily/AGENTS.md](.angellily/AGENTS.md). Sửa file, khởi động lại bot — xong. Model hiện tại được chèn tự động để agent trả lời được câu hỏi về thứ đang vận hành nó.
 
 ## Tài liệu
 

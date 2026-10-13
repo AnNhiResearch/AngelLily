@@ -15,7 +15,7 @@ It is written in TypeScript and runs as a single, tiny Node.js process with only
 - **Commands with human approval.** The AI can ask to run shell commands, but every command is shown in Telegram as a **Run / Cancel** prompt and only executes after explicit approval. Plugin hooks may rewrite a command *before* it is shown, so you always approve exactly what will run.
 - **Deterministic shell selection.** PowerShell 7 → PowerShell 5.1 on Windows (never `cmd.exe`), `/bin/sh` on Termux, macOS and Linux. The chosen environment is described to the model so it always writes commands in the right syntax — see [docs/shell-selection.md](docs/shell-selection.md).
 - **Optional external plugins.** Load extra commands, LLM tools, prompts and hooks from npm packages, optionally isolated in worker threads — see [docs/plugins.md](docs/plugins.md).
-- **Editable persona.** The system prompt lives in [AGENTS.md](AGENTS.md). Edit it and restart — no code changes needed.
+- **Editable persona.** The system prompt lives in [.angellily/AGENTS.md](.angellily/AGENTS.md). Edit it and restart — no code changes needed. It sits in the `.angellily/` folder so coding agents (Trae, Copilot, …) don't mistake it for their own workspace rules.
 - **Localized UI.** Bot messages (help, approvals, errors) in English or Vietnamese via `BOT_LANGUAGE`.
 - **Session-only memory.** Conversation context lives in RAM for the current session and is discarded on restart — no unbounded growth.
 
@@ -59,14 +59,14 @@ Or as a one-off without installing:
 npx @angellily/app
 ```
 
-Either way, the app auto-discovers `AGENTS.md` / `.env` from the current directory. Create them first:
+Either way, the app auto-discovers `.angellily/AGENTS.md` / `.env` from the current directory. Create them first:
 
 ```sh
 # in your project folder
 npx @angellily/app --init
 ```
 
-`--init` copies the default `AGENTS.md` and `.env.example` into `.`. Edit `.env`, add your token, then run `npx @angellily/app`.
+`--init` copies the default `.angellily/AGENTS.md` and `.env.example` into your project. Edit `.env`, add your token, then run `npx @angellily/app`.
 
 ### Option B: from source
 
@@ -116,7 +116,7 @@ npx @angellily/app --init
 
 ## Customizing the Persona
 
-The bot's identity and behavior rules live in [AGENTS.md](AGENTS.md) at the project root. Edit the file, restart the bot — done. The current model is injected automatically so the agent can answer questions about what powers it.
+The bot's identity and behavior rules live in [.angellily/AGENTS.md](.angellily/AGENTS.md). Edit the file, restart the bot — done. The current model is injected automatically so the agent can answer questions about what powers it.
 
 ## Documentation
 
