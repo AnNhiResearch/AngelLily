@@ -2,7 +2,7 @@
 import { readFileSync, existsSync, copyFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createAI } from './ai.js';
+import { createAI, type AI } from './ai.js';
 import { createAuth } from './auth.js';
 import { t } from './i18n.js';
 import { loadPlugins } from './plugins.js';
@@ -105,7 +105,24 @@ const auth = createAuth();
 // right after startTelegram returns.
 let telegram: TelegramClient | null = null;
 
+// Deferred AI controller proxy: plugins load before createAI(), but in-process
+// plugins (e.g. ai-gateway) need setConfig/getConfig at command time, which is
+// always after ai is initialized. The proxy forwards calls to the real AI once
+// it exists.
+let realAI: AI | null = null;
+const aiProxy = {
+  setConfig(config: { apiKey?: string; baseURL?: string; model?: string }) {
+    if (!realAI) throw new Error('AI not initialized yet');
+    realAI.setConfig(config);
+  },
+  getConfig() {
+    if (!realAI) throw new Error('AI not initialized yet');
+    return realAI.getConfig();
+  },
+};
+
 const plugins = await loadPlugins(process.cwd(), {
+  ai: aiProxy,
   onShellRequest: async (pluginName, command, chatId) => {
     if (!telegram) return { ok: false, output: 'Telegram not ready' };
     const approval = await telegram.requestApproval(
@@ -138,8 +155,6 @@ const ai = createAI({
   extraSystem: plugins.systemPrompt() || undefined,
   runCommand: (sessionId, command) => {
     const chatId = Number(sessionId);
-    // Plugin hooks may rewrite the command BEFORE it is shown for approval,
-    // so the owner always approves exactly what will run.
     const finalCommand = plugins.applyShellCommand(command, { chatId });
     return telegram
       ? telegram.requestApproval(chatId, finalCommand)
@@ -173,6 +188,9 @@ const ai = createAI({
     }
   },
 });
+
+// Now bind the deferred proxy so in-process plugins can control the AI.
+realAI = ai;
 
 telegram = startTelegram({
   token,

@@ -27,6 +27,11 @@ export interface PluginContext {
   config?: {
     read(filename: string): Promise<string>;
   };
+  /** AI controller for in-process plugins (e.g. ai-gateway). */
+  ai?: {
+    setConfig(config: { apiKey?: string; baseURL?: string; model?: string }): void;
+    getConfig(): { apiKey: string; baseURL?: string; model: string };
+  };
 }
 
 export interface PluginCommand {
@@ -73,6 +78,11 @@ export interface AngelPlugin {
 export interface PluginRuntimeOptions {
   onShellRequest?: (pluginName: string, command: string, chatId: number) => Promise<{ ok: boolean; output: string }>;
   onReadConfig?: (pluginName: string, filename: string) => Promise<string>;
+  /** AI controller exposed to in-process plugins (e.g. ai-gateway). */
+  ai?: {
+    setConfig(config: { apiKey?: string; baseURL?: string; model?: string }): void;
+    getConfig(): { apiKey: string; baseURL?: string; model: string };
+  };
 }
 
 export interface PluginRuntime {
@@ -94,6 +104,8 @@ const RPC_TIMEOUT_MS = 60_000;
 
 interface PluginConfig {
   spec: string;
+  /** Trusted plugins run in the main process (no fork, full context). */
+  inProcess?: boolean;
 }
 
 function readList(cwd: string): PluginConfig[] {
@@ -104,9 +116,9 @@ function readList(cwd: string): PluginConfig[] {
     }
     return parsed.map((entry): PluginConfig => {
       if (typeof entry === 'string') return { spec: entry };
-      const obj = entry as { package?: unknown };
+      const obj = entry as { package?: unknown; inProcess?: unknown };
       if (entry && typeof entry === 'object' && typeof obj.package === 'string') {
-        return { spec: obj.package };
+        return { spec: obj.package, inProcess: obj.inProcess === true };
       }
       throw new Error('each entry must be a package name or an object with a "package" field');
     });
@@ -155,6 +167,56 @@ export async function loadPlugins(
   const configs = readList(cwd);
   if (configs.length === 0) {
     return createRuntime([]);
+  }
+
+  const inProcessConfigs = configs.filter((c) => c.inProcess);
+  const runnerConfigs = configs.filter((c) => !c.inProcess);
+
+  // --- In-process plugins: import directly, full context ---
+  const inProcessPlugins: AngelPlugin[] = [];
+  for (const cfg of inProcessConfigs) {
+    try {
+      const specifier = toSpecifier(cfg.spec, cwd);
+      const mod = (await import(specifier)) as Record<string, unknown>;
+      const exported =
+        typeof mod.default === 'function' ? await (mod.default as () => unknown)() : (mod.default ?? mod);
+      const plugin = exported as AngelPlugin;
+
+      if (!plugin || typeof plugin.name !== 'string' || !plugin.name) {
+        console.warn(`[plugins] in-process "${cfg.spec}" has no valid plugin export, skipped`);
+        continue;
+      }
+
+      // Wrap commands/tools to inject full context (ai, shell, config)
+      const wrappedCommands: PluginCommand[] = (plugin.commands ?? []).map((c) => ({
+        ...c,
+        run: (args: string, ctx: PluginContext) => {
+          const richCtx: PluginContext = { ...ctx, ai: options.ai };
+          return c.run(args, richCtx as any);
+        },
+      }));
+      const wrappedTools: PluginTool[] = (plugin.tools ?? []).map((t) => ({
+        ...t,
+        run: (input: string, ctx: PluginContext) => {
+          const richCtx: PluginContext = { ...ctx, ai: options.ai };
+          return t.run(input, richCtx as any);
+        },
+      }));
+
+      inProcessPlugins.push({
+        ...plugin,
+        commands: wrappedCommands,
+        tools: wrappedTools,
+      });
+      console.log(`[plugins] loaded: ${plugin.name} (in-process)`);
+    } catch (err) {
+      console.warn(`[plugins] failed to load in-process "${cfg.spec}": ${(err as Error).message}`);
+    }
+  }
+
+  // --- Runner plugins: fork child process for isolation ---
+  if (runnerConfigs.length === 0) {
+    return createRuntime(inProcessPlugins);
   }
 
   // Create isolated environment for runner: exclude secrets
@@ -294,7 +356,7 @@ export async function loadPlugins(
 
   child.send({
     type: 'init',
-    specs: configs.map((c) => c.spec),
+    specs: runnerConfigs.map((c) => c.spec),
     cwd,
   } as HostToRunner);
 
@@ -326,7 +388,9 @@ export async function loadPlugins(
     };
   });
 
-  const runtime = createRuntime(pluginList);
+  // Merge: in-process plugins first (higher priority), then runner plugins
+  const allPlugins = [...inProcessPlugins, ...pluginList];
+  const runtime = createRuntime(allPlugins);
   return {
     ...runtime,
     stop: () => {
