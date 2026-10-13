@@ -6,7 +6,7 @@ const TG_LIMIT = 4096;
 const POLL_TIMEOUT = 25; // long polling timeout, seconds
 const RETRY_DELAY = 3000; // ms before retrying after a poll failure
 const UPDATE_INTERVAL = 5000; // live-edit interval while the LLM is writing
-const TYPING_INTERVAL = 4500; // typing indicator lasts ~5s, refresh just before
+const TYPING_INTERVAL = 3500; // Telegram typing indicator expires at ~5s; refresh every ~3.5s to ensure continuous status
 // When the live preview reaches this size it is committed as a permanent
 // message and a new preview message continues, until the answer is done.
 const CLOSE_AT = 4000;
@@ -178,9 +178,9 @@ function sendChatAction(token: string, chatId: number): Promise<void> {
   return post(token, 'sendChatAction', { chat_id: chatId, action: 'typing' }).then(() => undefined);
 }
 
-async function send(token: string, chatId: number, text: string): Promise<void> {
+async function send(token: string, chatId: number, text: string, parseMode?: 'HTML'): Promise<void> {
   for (const chunk of splitForTelegram(text)) {
-    await post(token, 'sendMessage', { chat_id: chatId, text: chunk });
+    await postText(token, 'sendMessage', { chat_id: chatId }, chunk, parseMode);
   }
 }
 
@@ -233,11 +233,11 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
   let running = true;
   let controller: AbortController | null = null;
 
-  async function sendSafe(chatId: number, text: string): Promise<void> {
+  async function sendSafe(chatId: number, text: string, parseMode: 'HTML' = 'HTML'): Promise<void> {
     try {
-      await send(token, chatId, text);
+      await send(token, chatId, text, parseMode);
     } catch (err) {
-      console.error('[telegram] sendMessage error:', err);
+      console.error(`[telegram] sendSafe failed for chat ${chatId}:`, err);
     }
   }
 
@@ -336,12 +336,13 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
       acc = s;
     };
 
-    // Keep the typing indicator alive until the answer is done.
+    // Immediately trigger typing indicator, then keep alive until the answer is done.
+    sendChatAction(token, chatId).catch(() => {});
     const typer = (async () => {
       while (!done) {
         await sleep(TYPING_INTERVAL);
         if (done) break;
-        sendChatAction(token, chatId).catch(() => {});
+        await sendChatAction(token, chatId).catch(() => {});
       }
     })();
 
@@ -375,6 +376,8 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
           try {
             if (liveId === null) {
               liveId = await sendOnce(token, chatId, pending, 'HTML');
+              // Sending a message automatically clears Telegram typing indicator; renew it if still streaming.
+              if (!done) sendChatAction(token, chatId).catch(() => {});
             } else {
               await editText(token, chatId, liveId, pending, 'HTML');
             }
@@ -420,7 +423,6 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
     };
 
     try {
-      await sendChatAction(token, chatId);
       const reply = await opts.onText(chatId, text, onPartial, finalizePreview);
       console.log(`[chat ${chatId}] lily: ${reply}`);
       await publish(); // flush the tail of the final round

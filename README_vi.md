@@ -1,6 +1,6 @@
 # AngelLily
 
-Một Autonomous Agent siêu nhỏ gọn — được thiết kế để chạy ở bất cứ đâu, kể cả laptop chỉ có 4 GB RAM hay Android TV Box thông qua Termux.
+Một Autonomous Agent siêu nhỏ gọn — được thiết kế để chạy ở bất cứ đâu, kể cả laptop chỉ có 4 GB RAM hay Android TV Box 1GB RAM, thông qua Termux .
 
 ## AngelLily là gì?
 
@@ -14,7 +14,7 @@ AngelLily là một autonomous agent theo tinh thần tương tự OpenClaw hay 
 - **Chỉ chủ nhân mới dùng được.** Người đầu tiên xác minh bằng `/verify`; mã OTP 6 số được in ra terminal (hiệu lực 60 giây) và phải gửi lại từ chính chat đó. Nhập sai 10 lần thì chat bị đưa vào blacklist. Không cần mật khẩu, không cần file cấu hình — ai đọc được terminal chính là chủ bot.
 - **Chạy lệnh phải có người duyệt.** AI có thể đề xuất chạy lệnh shell, nhưng mọi lệnh đều hiện trong Telegram dưới dạng **Chạy / Hủy** và chỉ được thực thi sau khi được duyệt tường minh. Hook của plugin có thể sửa lệnh *trước khi* hiển thị, nên bạn luôn duyệt đúng những gì sắp chạy.
 - **Chọn shell theo luật cố định.** PowerShell 7 → PowerShell 5.1 trên Windows (không bao giờ dùng `cmd.exe`), `/bin/sh` trên Termux, macOS và Linux. Môi trường được chọn được mô tả cho model để AI luôn viết lệnh đúng cú pháp — xem [docs/shell-selection_vi.md](docs/shell-selection_vi.md).
-- **Plugin bên ngoài, hoàn toàn tuỳ chọn.** Nạp thêm lệnh, công cụ cho LLM, prompt và hook từ các package npm, có thể cô lập trong worker thread — xem [docs/plugins_vi.md](docs/plugins_vi.md).
+- **Plugin bên ngoài tùy chọn.** Nạp thêm lệnh và công cụ LLM cô lập trong một tiến trình Single Shared Runner — xem [docs/plugins_vi.md](docs/plugins_vi.md).
 - **Persona chỉnh được.** System prompt nằm trong [.angellily/AGENTS.md](.angellily/AGENTS.md). Sửa file, khởi động lại — không cần đụng code. File nằm trong thư mục `.angellily/` để các AI coding agent (Trae, Copilot,…) không nhầm nó thành luật workspace của chúng.
 - **Giao diện đa ngôn ngữ.** Các thông báo của bot (help, phê duyệt, lỗi) bằng tiếng Anh hoặc tiếng Việt qua `BOT_LANGUAGE`.
 - **Bộ nhớ chỉ trong phiên.** Ngữ cảnh hội thoại nằm trong RAM của phiên hiện tại và bị xóa khi khởi động lại — không phình to theo thời gian.
@@ -112,7 +112,6 @@ npx @angellily/app --init
 | `OPENAI_MODEL` | `gpt-4o-mini` | Tên model gửi lên API |
 | `MAX_HISTORY` | `10` | Số tin nhắn giữ mỗi chat (cũ hơn bị bỏ) |
 | `BOT_LANGUAGE` | `vi` | Ngôn ngữ giao diện: `en` hoặc `vi` |
-| `FORCE_WORKER` | unset | Đặt `1` để ép mọi plugin vào worker thread riêng |
 
 ## Tùy biến persona
 

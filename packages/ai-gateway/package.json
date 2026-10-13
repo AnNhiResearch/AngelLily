@@ -1,0 +1,13 @@
+{
+  "name": "@angellily/plugin-ai-gateway",
+  "version": "0.0.1",
+  "description": "Dynamic AI provider, account, and model gateway for AngelLily",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

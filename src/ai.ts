@@ -35,6 +35,12 @@ export interface AIOptions {
   runTool?: (sessionId: string, name: string, input: string) => Promise<CommandApproval>;
 }
 
+export interface AIConfig {
+  apiKey?: string;
+  baseURL?: string;
+  model?: string;
+}
+
 export interface AI {
   /**
    * Send a user message, get the assistant reply.
@@ -53,6 +59,10 @@ export interface AI {
   ): Promise<string>;
   /** Reset a session's history. */
   clear(sessionId: string): void;
+  /** Update AI provider/model runtime configuration dynamically. */
+  setConfig(config: AIConfig): void;
+  /** Read current AI provider/model runtime configuration. */
+  getConfig(): { apiKey: string; baseURL?: string; model: string };
 }
 
 // The persona and Telegram HTML rules live in .angellily/AGENTS.md (loaded in main).
@@ -99,11 +109,13 @@ function visible(text: string): string {
 }
 
 export function createAI(opts: AIOptions): AI {
-  const client = new OpenAI({
-    apiKey: opts.apiKey,
-    baseURL: opts.baseURL,
+  let currentApiKey = opts.apiKey;
+  let currentBaseURL = opts.baseURL;
+  let client = new OpenAI({
+    apiKey: currentApiKey,
+    baseURL: currentBaseURL,
   });
-  const model = opts.model ?? 'gpt-4o-mini';
+  let model = opts.model ?? 'gpt-4o-mini';
   const maxHistory = opts.maxHistory ?? 20;
   let system = opts.system ?? '';
   system += opts.extraSystem ? `\n\n${opts.extraSystem}` : '';
@@ -135,6 +147,37 @@ export function createAI(opts: AIOptions): AI {
   function clear(sessionId: string): void {
     sessions.delete(sessionId);
     console.log(`[ai] history cleared for session ${sessionId}`);
+  }
+
+  function setConfig(config: AIConfig): void {
+    let clientChanged = false;
+    if (config.apiKey !== undefined && config.apiKey !== currentApiKey) {
+      currentApiKey = config.apiKey;
+      clientChanged = true;
+    }
+    if (config.baseURL !== undefined && config.baseURL !== currentBaseURL) {
+      currentBaseURL = config.baseURL;
+      clientChanged = true;
+    }
+    if (clientChanged) {
+      client = new OpenAI({
+        apiKey: currentApiKey,
+        baseURL: currentBaseURL,
+      });
+      console.log(`[ai] client re-initialized with baseURL: ${currentBaseURL ?? 'default'}`);
+    }
+    if (config.model !== undefined && config.model !== model) {
+      model = config.model;
+      console.log(`[ai] model switched to: ${model}`);
+    }
+  }
+
+  function getConfig(): { apiKey: string; baseURL?: string; model: string } {
+    return {
+      apiKey: currentApiKey,
+      baseURL: currentBaseURL,
+      model,
+    };
   }
 
   // Parse the shell command block: a complete block, or a lenient fallback
@@ -270,5 +313,10 @@ export function createAI(opts: AIOptions): AI {
     return full.trim() || t.noResponse;
   }
 
-  return { chat, clear };
+  return {
+    chat,
+    clear,
+    setConfig,
+    getConfig,
+  };
 }

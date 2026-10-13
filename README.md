@@ -1,6 +1,6 @@
 # AngelLily
 
-A featherweight autonomous agent — built to run anywhere, even on a 4 GB RAM laptop or an Android TV box through Termux.
+A featherweight autonomous agent — built to run anywhere, even on a 4 GB RAM laptop or an Android TV 1GB RAM box through Termux.
 
 ## What is AngelLily?
 
@@ -14,7 +14,7 @@ It is written in TypeScript and runs as a single, tiny Node.js process with only
 - **Owner-only by design.** The first user verifies with `/verify`; a 6-digit OTP is printed on the terminal (valid 60 seconds) and must be sent back from the same chat. Ten wrong codes put the chat on a blacklist. No passwords, no config files — the person who can read the terminal is the owner.
 - **Commands with human approval.** The AI can ask to run shell commands, but every command is shown in Telegram as a **Run / Cancel** prompt and only executes after explicit approval. Plugin hooks may rewrite a command *before* it is shown, so you always approve exactly what will run.
 - **Deterministic shell selection.** PowerShell 7 → PowerShell 5.1 on Windows (never `cmd.exe`), `/bin/sh` on Termux, macOS and Linux. The chosen environment is described to the model so it always writes commands in the right syntax — see [docs/shell-selection.md](docs/shell-selection.md).
-- **Optional external plugins.** Load extra commands, LLM tools, prompts and hooks from npm packages, optionally isolated in worker threads — see [docs/plugins.md](docs/plugins.md).
+- **Optional external plugins.** Load extra commands and LLM tools isolated in a Single Shared Runner process — see [docs/plugins.md](docs/plugins.md).
 - **Editable persona.** The system prompt lives in [.angellily/AGENTS.md](.angellily/AGENTS.md). Edit it and restart — no code changes needed. It sits in the `.angellily/` folder so coding agents (Trae, Copilot, …) don't mistake it for their own workspace rules.
 - **Localized UI.** Bot messages (help, approvals, errors) in English or Vietnamese via `BOT_LANGUAGE`.
 - **Session-only memory.** Conversation context lives in RAM for the current session and is discarded on restart — no unbounded growth.
@@ -112,7 +112,6 @@ npx @angellily/app --init
 | `OPENAI_MODEL` | `gpt-4o-mini` | Model name sent to the API |
 | `MAX_HISTORY` | `10` | Messages kept per chat (older ones are dropped) |
 | `BOT_LANGUAGE` | `vi` | UI language: `en` or `vi` |
-| `FORCE_WORKER` | unset | Set to `1` to force every plugin into its own worker thread |
 
 ## Customizing the Persona
 

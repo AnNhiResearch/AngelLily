@@ -1,21 +1,32 @@
-// Plugin system: a tiny loader plus a registry. Plugins are npm packages
-// (or local folders) listed in plugins.json; each default-exports an
-// AngelPlugin. Nothing here knows about Telegram, the AI or the shell —
-// main.ts wires the registry into the existing modules.
-//
-// A plugin can also run in its own worker thread (isolation): the same
-// module is loaded inside a dedicated V8 instance and the host talks to it
-// over postMessage. Workers only support commands, tools and systemPrompt —
-// hooks are synchronous per-tick transforms and stay in-process only.
+// Plugin system: a tiny loader plus a registry.
+// Supports running plugins in an isolated Single Shared Runner child process
+// with a clean environment (no bot tokens, no API keys), capability-based shell
+// and config file access.
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { Worker } from 'node:worker_threads';
+import { pathToFileURL } from 'node:url';
+import { fork, type ChildProcess } from 'node:child_process';
+import type {
+  HostToRunner,
+  RunnerToHost,
+  RunnerRegisterMsg,
+  RunnerResultMsg,
+  RunnerHostRequestMsg,
+  PluginManifest,
+} from './plugin_runner.js';
 
 export interface PluginContext {
   /** Telegram chat id (the AI session id is the same value as a string). */
   chatId: number;
+  /** Optional shell capability provided by host */
+  shell?: {
+    run(command: string): Promise<{ ok: boolean; output: string }>;
+  };
+  /** Optional config reader scoped to plugin */
+  config?: {
+    read(filename: string): Promise<string>;
+  };
 }
 
 export interface PluginCommand {
@@ -48,6 +59,7 @@ export interface PluginHooks {
 export interface AngelPlugin {
   /** Unique plugin name. The first plugin wins on name conflicts. */
   name: string;
+  manifest?: PluginManifest;
   /** Passive: appended to the system prompt for every session. */
   systemPrompt?: string;
   /** User-invoked commands with a / or # prefix. */
@@ -58,32 +70,9 @@ export interface AngelPlugin {
   hooks?: PluginHooks;
 }
 
-// Wire protocol between the host and a plugin worker (src/plugin_worker.ts).
-export interface WorkerRegister {
-  type: 'register';
-  name: string;
-  systemPrompt?: string;
-  hasHooks: boolean;
-  commands: { command: string; description?: string }[];
-  tools: { name: string; description: string; approval?: boolean }[];
-}
-export interface WorkerCall {
-  type: 'call';
-  id: number;
-  kind: 'command' | 'tool';
-  name: string;
-  input: string;
-  chatId: number;
-}
-export interface WorkerResult {
-  type: 'result';
-  id: number;
-  ok: boolean;
-  output: string;
-}
-export interface WorkerError {
-  type: 'error';
-  message: string;
+export interface PluginRuntimeOptions {
+  onShellRequest?: (pluginName: string, command: string, chatId: number) => Promise<{ ok: boolean; output: string }>;
+  onReadConfig?: (pluginName: string, filename: string) => Promise<string>;
 }
 
 export interface PluginRuntime {
@@ -97,29 +86,27 @@ export interface PluginRuntime {
   applyIncoming(text: string, ctx: PluginContext): string | null;
   applyOutgoing(text: string, ctx: PluginContext): string;
   applyShellCommand(command: string, ctx: PluginContext): string;
+  stop?(): void;
 }
 
 const LIST_FILE = 'plugins.json';
 const RPC_TIMEOUT_MS = 60_000;
 
 interface PluginConfig {
-  /** npm package name or local folder path. */
   spec: string;
-  /** Run in a dedicated worker thread instead of the bot process. */
-  worker: boolean;
 }
 
 function readList(cwd: string): PluginConfig[] {
   try {
     const parsed: unknown = JSON.parse(readFileSync(join(cwd, LIST_FILE), 'utf8'));
     if (!Array.isArray(parsed)) {
-      throw new Error('must be a JSON array of package names or { "package", "worker" } objects');
+      throw new Error('must be a JSON array of package names or { "package" } objects');
     }
     return parsed.map((entry): PluginConfig => {
-      if (typeof entry === 'string') return { spec: entry, worker: false };
-      const obj = entry as { package?: unknown; worker?: unknown };
+      if (typeof entry === 'string') return { spec: entry };
+      const obj = entry as { package?: unknown };
       if (entry && typeof entry === 'object' && typeof obj.package === 'string') {
-        return { spec: obj.package, worker: obj.worker === true };
+        return { spec: obj.package };
       }
       throw new Error('each entry must be a package name or an object with a "package" field');
     });
@@ -133,152 +120,222 @@ function readList(cwd: string): PluginConfig[] {
   }
 }
 
-// "./x", "../x", "/x", "\x" or "C:\x" are local folders; anything else is an
-// npm package name (scoped names like "@org/pkg" are fine).
 const IS_LOCAL = /^(?:\.{1,2}[\\/]|[\\/]|[A-Za-z]:[\\/])/;
 
 function toSpecifier(spec: string, cwd: string): string {
   if (!IS_LOCAL.test(spec)) return spec;
   const path = resolve(cwd, spec);
-  // ESM cannot import a directory; resolve it to its entry file.
   if (statSync(path, { throwIfNoEntry: false })?.isDirectory()) {
-    for (const index of ['index.mjs', 'index.js', 'index.cjs']) {
+    const pkgPath = join(path, 'package.json');
+    if (existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+        if (pkg.main && existsSync(join(path, pkg.main))) {
+          return pathToFileURL(join(path, pkg.main)).href;
+        }
+      } catch {}
+    }
+    for (const index of ['index.mjs', 'index.js', 'index.cjs', 'dist/index.js', 'dist/index.mjs']) {
       if (existsSync(join(path, index))) return pathToFileURL(join(path, index)).href;
     }
   }
   return pathToFileURL(path).href;
 }
 
-interface Pending {
+interface PendingCall {
   resolve(output: string): void;
   reject(err: Error): void;
   timer: NodeJS.Timeout;
 }
 
-// Loads the plugin inside a worker thread and returns a normal AngelPlugin
-// whose run() functions proxy over postMessage. If the worker dies, calls
-// fail with an error message and the bot keeps running.
-function createWorkerPlugin(config: PluginConfig, cwd: string): Promise<AngelPlugin> {
-  const specifier = toSpecifier(config.spec, cwd);
-  const worker = new Worker(fileURLToPath(new URL('./plugin_worker.js', import.meta.url)), {
-    workerData: { specifier },
-  });
+export async function loadPlugins(
+  cwd: string = process.cwd(),
+  options: PluginRuntimeOptions = {},
+): Promise<PluginRuntime> {
+  const configs = readList(cwd);
+  if (configs.length === 0) {
+    return createRuntime([]);
+  }
 
-  let label = config.spec;
-  let loaded = false;
+  // Create isolated environment for runner: exclude secrets
+  const safeEnv: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v === undefined) continue;
+    // Strip sensitive keys
+    if (
+      k.includes('TOKEN') ||
+      k.includes('KEY') ||
+      k.includes('SECRET') ||
+      k.startsWith('TELEGRAM_') ||
+      k.startsWith('OPENAI_')
+    ) {
+      continue;
+    }
+    safeEnv[k] = v;
+  }
+
+  const runnerEntry = resolve(cwd, 'dist/plugin_runner.js');
+  let child: ChildProcess;
+  try {
+    child = fork(runnerEntry, [], {
+      cwd,
+      env: safeEnv,
+      stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+    });
+  } catch (err) {
+    console.warn(`[plugins] failed to start plugin runner: ${(err as Error).message}`);
+    return createRuntime([]);
+  }
+
+  child.stdout?.on('data', (d) => process.stdout.write(d));
+  child.stderr?.on('data', (d) => process.stderr.write(d));
+
   let alive = true;
-  let nextId = 0;
-  const pending = new Map<number, Pending>();
+  let nextCallId = 0;
+  const pendingCalls = new Map<number, PendingCall>();
 
   const failAll = (err: Error) => {
-    for (const [, p] of pending) {
+    for (const [, p] of pendingCalls) {
       clearTimeout(p.timer);
       p.reject(err);
     }
-    pending.clear();
+    pendingCalls.clear();
   };
+
   const die = (reason: string) => {
     if (!alive) return;
     alive = false;
-    failAll(new Error(`Plugin "${label}" has stopped (worker exited).`));
-    if (loaded) console.warn(`[plugins] worker for "${label}" stopped: ${reason}`);
+    failAll(new Error(`Plugin runner stopped: ${reason}`));
+    console.warn(`[plugins] runner stopped: ${reason}`);
   };
 
-  worker.on('message', (msg: WorkerResult) => {
-    if (!msg || msg.type !== 'result') return;
-    const p = pending.get(msg.id);
-    if (!p) return;
-    pending.delete(msg.id);
-    clearTimeout(p.timer);
-    if (msg.ok) p.resolve(msg.output);
-    else p.reject(new Error(msg.output));
-  });
-  worker.on('error', (err) => die(err.message));
-  worker.on('exit', (code) => die(`exited with code ${code}`));
+  child.on('error', (err) => die(err.message));
+  child.on('exit', (code) => die(`exited with code ${code}`));
 
-  const call = (kind: 'command' | 'tool', name: string, input: string, chatId: number) => {
-    if (!alive) return Promise.resolve(`Plugin "${label}" has stopped (worker exited).`);
-    const id = ++nextId;
+  child.on('message', async (msg: RunnerToHost) => {
+    if (!msg) return;
+    if (msg.type === 'result') {
+      const p = pendingCalls.get(msg.id);
+      if (!p) return;
+      pendingCalls.delete(msg.id);
+      clearTimeout(p.timer);
+      if (msg.ok) p.resolve(msg.output);
+      else p.reject(new Error(msg.output));
+    } else if (msg.type === 'host_request') {
+      await handleHostRequest(msg);
+    }
+  });
+
+  async function handleHostRequest(req: RunnerHostRequestMsg) {
+    let ok = true;
+    let data: unknown;
+    let error: string | undefined;
+
+    try {
+      if (req.action === 'shell') {
+        const cmd = String(req.payload.command ?? '');
+        const chatId = Number(req.payload.chatId ?? 0);
+        if (!options.onShellRequest) throw new Error('Shell execution not supported on host');
+        data = await options.onShellRequest(req.pluginName, cmd, chatId);
+      } else if (req.action === 'read_config') {
+        const filename = String(req.payload.filename ?? '');
+        if (!options.onReadConfig) throw new Error('Config reading not supported on host');
+        data = await options.onReadConfig(req.pluginName, filename);
+      } else {
+        throw new Error(`Unsupported host action "${req.action}"`);
+      }
+    } catch (err) {
+      ok = false;
+      error = (err as Error).message;
+    }
+
+    if (alive && child.send) {
+      child.send({
+        type: 'host_response',
+        id: req.id,
+        ok,
+        data,
+        error,
+      } as HostToRunner);
+    }
+  }
+
+  const callPlugin = (kind: 'command' | 'tool', name: string, input: string, chatId: number) => {
+    if (!alive) return Promise.resolve(`Plugin runner has stopped.`);
+    const id = ++nextCallId;
     return new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
-        pending.delete(id);
-        reject(new Error(`Plugin "${label}" did not respond within ${RPC_TIMEOUT_MS / 1000}s.`));
+        pendingCalls.delete(id);
+        reject(new Error(`Call "${name}" timed out after ${RPC_TIMEOUT_MS / 1000}s.`));
       }, RPC_TIMEOUT_MS);
-      pending.set(id, { resolve, reject, timer });
-      worker.postMessage({ type: 'call', id, kind, name, input, chatId });
+      pendingCalls.set(id, { resolve, reject, timer });
+      child.send({
+        type: 'call',
+        id,
+        kind,
+        name,
+        input,
+        chatId,
+      } as HostToRunner);
     });
   };
 
-  const info = new Promise<WorkerRegister>((resolve, reject) => {
-    worker.once('message', (msg: WorkerRegister | WorkerError) => {
-      if (msg?.type === 'register') resolve(msg);
-      else if (msg?.type === 'error') reject(new Error(msg.message));
-      else reject(new Error('unexpected first message from worker'));
-    });
-    worker.once('error', (err) => reject(err));
-    worker.once('exit', (code) =>
-      reject(new Error(`worker exited with code ${code} before registering`)),
-    );
-  }).then((reg): AngelPlugin => {
-    loaded = true;
-    label = reg.name;
-    if (reg.hasHooks) {
-      console.warn(
-        `[plugins] "${reg.name}" declares hooks; hooks are ignored in worker mode (in-process only)`,
-      );
-    }
-    console.log(`[plugins] loaded: ${reg.name} (worker)`);
+  const registerPromise = new Promise<RunnerRegisterMsg>((resolve, reject) => {
+    const handler = (msg: RunnerToHost) => {
+      if (msg?.type === 'register') {
+        child.off('message', handler);
+        resolve(msg);
+      }
+    };
+    child.on('message', handler);
+    child.once('error', reject);
+    child.once('exit', (code) => reject(new Error(`Runner exited with code ${code} before registering`)));
+  });
+
+  child.send({
+    type: 'init',
+    specs: configs.map((c) => c.spec),
+    cwd,
+  } as HostToRunner);
+
+  let reg: RunnerRegisterMsg;
+  try {
+    reg = await registerPromise;
+  } catch (err) {
+    console.warn(`[plugins] registration failed: ${(err as Error).message}`);
+    child.kill();
+    return createRuntime([]);
+  }
+
+  const pluginList: AngelPlugin[] = reg.plugins.map((p) => {
+    console.log(`[plugins] loaded: ${p.name} (isolated runner)`);
     return {
-      name: reg.name,
-      ...(reg.systemPrompt ? { systemPrompt: reg.systemPrompt } : {}),
-      commands: reg.commands.map((c) => ({
+      name: p.name,
+      ...(p.systemPrompt ? { systemPrompt: p.systemPrompt } : {}),
+      commands: p.commands.map((c) => ({
         command: c.command,
         ...(c.description ? { description: c.description } : {}),
-        run: (args, ctx) => call('command', c.command, args, ctx.chatId),
+        run: (args, ctx) => callPlugin('command', c.command, args, ctx.chatId),
       })),
-      tools: reg.tools.map((t) => ({
+      tools: p.tools.map((t) => ({
         name: t.name,
         description: t.description,
         ...(t.approval ? { approval: t.approval } : {}),
-        run: (input, ctx) => call('tool', t.name, input, ctx.chatId),
+        run: (input, ctx) => callPlugin('tool', t.name, input, ctx.chatId),
       })),
     };
   });
 
-  return info;
-}
-
-export async function loadPlugins(cwd: string = process.cwd()): Promise<PluginRuntime> {
-  const list: AngelPlugin[] = [];
-  const forceWorker = ['1', 'true'].includes((process.env.FORCE_WORKER ?? '').toLowerCase());
-  for (const config of readList(cwd)) {
-    try {
-      if (config.worker || forceWorker) {
-        list.push(await createWorkerPlugin(config, cwd));
-      } else {
-        const mod: Record<string, unknown> = await import(toSpecifier(config.spec, cwd));
-        const exported =
-          typeof mod.default === 'function'
-            ? (mod.default as () => unknown)()
-            : (mod.default ?? mod);
-        const plugin = exported as AngelPlugin;
-        if (!plugin || typeof plugin.name !== 'string' || !plugin.name) {
-          console.warn(`[plugins] "${config.spec}" has no default export with a name, skipped`);
-          continue;
-        }
-        if (list.some((p) => p.name === plugin.name)) {
-          console.warn(`[plugins] duplicate plugin name "${plugin.name}" from "${config.spec}", skipped`);
-          continue;
-        }
-        list.push(plugin);
-        console.log(`[plugins] loaded: ${plugin.name}`);
+  const runtime = createRuntime(pluginList);
+  return {
+    ...runtime,
+    stop: () => {
+      if (alive) {
+        alive = false;
+        child.kill();
       }
-    } catch (err) {
-      // One broken plugin must not take the whole bot down.
-      console.warn(`[plugins] failed to load "${config.spec}": ${(err as Error).message}`);
-    }
-  }
-  return createRuntime(list);
+    },
+  };
 }
 
 function createRuntime(list: AngelPlugin[]): PluginRuntime {

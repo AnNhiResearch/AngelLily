@@ -98,13 +98,35 @@ const apiKey = requireEnv('OPENAI_API_KEY');
 
 const maxHistory = Number(process.env.MAX_HISTORY);
 
-const plugins = await loadPlugins();
 const shell = await createShell();
 const auth = createAuth();
 
 // Late-bound: the approval UI lives in the Telegram module and is assigned
 // right after startTelegram returns.
 let telegram: TelegramClient | null = null;
+
+const plugins = await loadPlugins(process.cwd(), {
+  onShellRequest: async (pluginName, command, chatId) => {
+    if (!telegram) return { ok: false, output: 'Telegram not ready' };
+    const approval = await telegram.requestApproval(
+      chatId,
+      `[Plugin: ${pluginName}] yêu cầu chạy lệnh shell:\n${command}`,
+      () => shell.run(command),
+    );
+    if (!approval.approved) {
+      return { ok: false, output: 'Chủ sở hữu từ chối phê duyệt lệnh.' };
+    }
+    return { ok: true, output: approval.output };
+  },
+  onReadConfig: async (pluginName, filename) => {
+    // Files are safely isolated in .angellily/plugins/<pluginName>/<filename>
+    const safePath = resolve(process.cwd(), '.angellily', 'plugins', pluginName, filename);
+    if (!existsSync(safePath)) {
+      throw new Error(`File config "${filename}" không tồn tại cho plugin "${pluginName}".`);
+    }
+    return readFileSync(safePath, 'utf8');
+  },
+});
 
 const ai = createAI({
   apiKey,
@@ -128,6 +150,9 @@ const ai = createAI({
     const chatId = Number(sessionId);
     const tool = plugins.getTool(name);
     if (!tool) return { approved: false, output: t.noTool(name) };
+    const toolCtx = {
+      chatId,
+    };
     try {
       if (tool.approval) {
         if (!telegram) return { approved: false, output: '' };
@@ -135,13 +160,13 @@ const ai = createAI({
           chatId,
           t.toolApproval(name, input),
           () =>
-            Promise.resolve(tool.run(input, { chatId })).then((output) => ({
+            Promise.resolve(tool.run(input, toolCtx)).then((output) => ({
               ok: true,
               output,
             })),
         );
       }
-      return { approved: true, output: await tool.run(input, { chatId }) };
+      return { approved: true, output: await tool.run(input, toolCtx) };
     } catch (err) {
       console.error(`[plugins] tool ${name} failed:`, err);
       return { approved: true, output: t.toolError((err as Error).message) };
@@ -157,7 +182,9 @@ telegram = startTelegram({
     const match = plugins.matchCommand(text);
     if (!match) return null;
     try {
-      return await match.command.run(match.args, { chatId });
+      return await match.command.run(match.args, {
+        chatId,
+      });
     } catch (err) {
       console.error(`[plugins] command ${text} failed:`, err);
       return t.pluginError((err as Error).message);
