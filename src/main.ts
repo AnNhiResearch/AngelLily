@@ -194,6 +194,9 @@ const ai = createAI({
 // Now bind the deferred proxy so in-process plugins can control the AI.
 realAI = ai;
 
+// Initialize plugins (e.g. ai-gateway loads active provider/account/model from gateways.json)
+await plugins.init({ chatId: 0, locale, ai: aiProxy });
+
 telegram = startTelegram({
   token,
   auth,
@@ -227,9 +230,10 @@ telegram = startTelegram({
   onClear: (chatId) => ai.clear(String(chatId)),
 });
 
+const currentConfig = ai.getConfig();
 console.log('Angel Lily started. Listening for messages...');
-console.log(`Model: ${process.env.OPENAI_MODEL ?? 'gpt-4o-mini'}`);
-console.log(`Base URL: ${process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'}`);
+console.log(`Model: ${currentConfig.model}`);
+console.log(`Base URL: ${currentConfig.baseURL ?? 'https://api.openai.com/v1'}`);
 console.log(`Shell environment: ${shell.describe()}`);
 console.log(`Plugins: ${plugins.names.length ? plugins.names.join(', ') : '(none)'}`);
 

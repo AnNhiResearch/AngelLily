@@ -117,14 +117,28 @@ export function createAI(opts: AIOptions): AI {
   });
   let model = opts.model ?? 'gpt-4o-mini';
   const maxHistory = opts.maxHistory ?? 20;
-  let system = opts.system ?? '';
-  system += opts.extraSystem ? `\n\n${opts.extraSystem}` : '';
-  if (opts.runCommand) {
-    system += SHELL_PROMPT.replace('{ENV}', opts.environment ?? 'unknown');
+  const baseSystem = opts.system ?? '';
+
+  function buildSystem(): string {
+    let s = baseSystem;
+    if (/Underlying model: [^\n.]+/i.test(s)) {
+      s = s.replace(/Underlying model: [^\n.]+/i, `Underlying model: ${model}`);
+    } else if (s) {
+      s += `\n\nUnderlying model: ${model}.`;
+    } else {
+      s = `Underlying model: ${model}.`;
+    }
+    s += opts.extraSystem ? `\n\n${opts.extraSystem}` : '';
+    if (opts.runCommand) {
+      s += SHELL_PROMPT.replace('{ENV}', opts.environment ?? 'unknown');
+    }
+    if (opts.runTool && opts.tools?.length) {
+      s += toolsPrompt(opts.tools);
+    }
+    return s;
   }
-  if (opts.runTool && opts.tools?.length) {
-    system += toolsPrompt(opts.tools);
-  }
+
+  let system = buildSystem();
 
   // Session-only history: lives in memory, gone on restart. No persistence.
   const sessions = new Map<string, Message[]>();
@@ -168,6 +182,7 @@ export function createAI(opts: AIOptions): AI {
     }
     if (config.model !== undefined && config.model !== model) {
       model = config.model;
+      system = buildSystem();
       console.log(`[ai] model switched to: ${model}`);
     }
   }

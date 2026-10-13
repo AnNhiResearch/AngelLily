@@ -192,6 +192,11 @@ export default function createGatewayPlugin() {
 
   return {
     name: 'ai-gateway',
+    init: (ctx: PluginContext) => {
+      const s = ensureStore(ctx);
+      applyActiveConfig(ctx, s);
+      console.log(`[ai-gateway] active: ${s.activeProvider} (account: ${s.activeAccount}, model: ${s.activeModel})`);
+    },
     commands: [
       {
         command: 'model',

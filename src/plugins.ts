@@ -75,6 +75,8 @@ export interface AngelPlugin {
   tools?: PluginTool[];
   /** Hooks into the default modules. */
   hooks?: PluginHooks;
+  /** Optional lifecycle hook called once at bot startup. */
+  init?(ctx: PluginContext): void | Promise<void>;
 }
 
 export interface PluginRuntimeOptions {
@@ -89,6 +91,8 @@ export interface PluginRuntimeOptions {
 
 export interface PluginRuntime {
   readonly names: readonly string[];
+  /** Register / run startup hooks for plugins. */
+  init(ctx: PluginContext): Promise<void>;
   /** Combined extra system prompt (empty string when no plugin provides one). */
   systemPrompt(): string;
   toolInfos(): { name: string; description: string }[];
@@ -449,6 +453,17 @@ function createRuntime(list: AngelPlugin[]): PluginRuntime {
 
   return {
     names: list.map((p) => p.name),
+    init: async (ctx) => {
+      for (const p of list) {
+        if (p.init) {
+          try {
+            await p.init(ctx);
+          } catch (err) {
+            console.error(`[plugins] init failed for ${p.name}:`, err);
+          }
+        }
+      }
+    },
     systemPrompt: () =>
       list
         .map((p) => p.systemPrompt?.trim())
