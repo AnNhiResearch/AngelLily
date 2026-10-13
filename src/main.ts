@@ -229,3 +229,11 @@ console.log(`Model: ${process.env.OPENAI_MODEL ?? 'gpt-4o-mini'}`);
 console.log(`Base URL: ${process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'}`);
 console.log(`Shell environment: ${shell.describe()}`);
 console.log(`Plugins: ${plugins.names.length ? plugins.names.join(', ') : '(none)'}`);
+
+// Register bot commands with Telegram (built-in + plugin commands)
+const builtinCommands = [
+  { command: 'start', description: 'Show help' },
+  { command: 'clear', description: 'Clear conversation' },
+];
+const allCommands = [...builtinCommands, ...plugins.commandInfos()];
+telegram.setMyCommands(allCommands).catch(() => {});

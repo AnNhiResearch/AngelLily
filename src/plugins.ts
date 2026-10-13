@@ -91,6 +91,8 @@ export interface PluginRuntime {
   systemPrompt(): string;
   toolInfos(): { name: string; description: string }[];
   getTool(name: string): PluginTool | undefined;
+  /** Plugin-registered commands for Telegram setMyCommands. */
+  commandInfos(): { command: string; description: string }[];
   /** "/name args" or "#name args" → the registered command plus its args. */
   matchCommand(text: string): { command: PluginCommand; args: string } | undefined;
   applyIncoming(text: string, ctx: PluginContext): string | null;
@@ -452,6 +454,11 @@ function createRuntime(list: AngelPlugin[]): PluginRuntime {
         .join('\n\n'),
     toolInfos: () => [...tools.values()].map((t) => ({ name: t.name, description: t.description })),
     getTool: (name) => tools.get(name),
+    commandInfos: () =>
+      [...commands.values()].map((c) => ({
+        command: c.command,
+        description: c.description ?? c.command,
+      })),
     matchCommand: (text) => {
       const m = text.match(/^([/#])([A-Za-z0-9_-]+)(?:\s+([\s\S]*))?$/);
       const command = m ? commands.get(m[2]) : undefined;

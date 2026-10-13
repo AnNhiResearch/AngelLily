@@ -112,27 +112,27 @@ export default function createGatewayPlugin() {
     commands: [
       {
         command: 'model',
-        description: 'Xem hoặc chuyển đổi model AI trong cùng nhà cung cấp (/model <tên>)',
+        description: 'View or switch the AI model within the current provider',
         run: (args: string, ctx: PluginContext) => {
           const s = ensureStore(ctx);
           const currentProvider = s.providers[s.activeProvider];
 
           if (!currentProvider) {
-            return `<b>Lỗi:</b> Không tìm thấy cấu hình cho provider <code>${escapeHtml(s.activeProvider)}</code>.`;
+            return `<b>Error:</b> No config found for provider <code>${escapeHtml(s.activeProvider)}</code>.`;
           }
 
           const targetModel = args.trim();
           if (!targetModel) {
             const list = currentProvider.models.map((m) => {
-              const active = m === s.activeModel ? ' <b>(đang dùng)</b>' : '';
+              const active = m === s.activeModel ? ' <b>(active)</b>' : '';
               return `• <code>${escapeHtml(m)}</code>${active}`;
             });
             return (
-              `<b>🤖 Model hiện tại:</b> <code>${escapeHtml(s.activeModel)}</code>\n` +
-              `<b>🏢 Nhà cung cấp:</b> <code>${escapeHtml(s.activeProvider)}</code>\n\n` +
-              `<b>Danh sách model có sẵn:</b>\n` +
-              (list.length ? list.join('\n') : '<i>(Chưa có danh sách)</i>') +
-              `\n\n<i>Dùng <code>/model &lt;tên_model&gt;</code> để chuyển sang model khác.</i>`
+              `<b>Current model:</b> <code>${escapeHtml(s.activeModel)}</code>\n` +
+              `<b>Provider:</b> <code>${escapeHtml(s.activeProvider)}</code>\n\n` +
+              `<b>Available models:</b>\n` +
+              (list.length ? list.join('\n') : '<i>(none)</i>') +
+              `\n\n<i>Use <code>/model &lt;name&gt;</code> to switch.</i>`
             );
           }
 
@@ -145,14 +145,14 @@ export default function createGatewayPlugin() {
           applyActiveConfig(ctx, s);
 
           return (
-            `✅ Đã chuyển sang model: <code>${escapeHtml(targetModel)}</code>\n` +
-            `Nhà cung cấp: <code>${escapeHtml(s.activeProvider)}</code>`
+            `Switched to model: <code>${escapeHtml(targetModel)}</code>\n` +
+            `Provider: <code>${escapeHtml(s.activeProvider)}</code>`
           );
         },
       },
       {
         command: 'gateway',
-        description: 'Quản lý AI Gateway: /gateway providers [name], /gateway use <acc>, /gateway add ...',
+        description: 'Manage AI Gateway: providers, accounts, add config',
         run: (args: string, ctx: PluginContext) => {
           const s = ensureStore(ctx);
           const parts = args.trim().split(/\s+/).filter(Boolean);
@@ -171,16 +171,16 @@ export default function createGatewayPlugin() {
               });
 
               return (
-                `<b>🏢 Danh sách Nhà cung cấp (Providers):</b>\n\n` +
-                (list.length ? list.join('\n\n') : '<i>Không có provider nào.</i>') +
-                `\n\n<i>Dùng <code>/gateway providers &lt;tên&gt;</code> để chuyển sang provider đó.</i>`
+                `<b>Providers:</b>\n\n` +
+                (list.length ? list.join('\n\n') : '<i>No providers configured.</i>') +
+                `\n\n<i>Use <code>/gateway providers &lt;name&gt;</code> to switch.</i>`
               );
             }
 
             // Switch provider
             const target = s.providers[targetProvider];
             if (!target) {
-              return `❌ Không tìm thấy provider <code>${escapeHtml(targetProvider)}</code>. Dùng <code>/gateway providers</code> để xem danh sách.`;
+              return `Provider <code>${escapeHtml(targetProvider)}</code> not found. Use <code>/gateway providers</code> to list.`;
             }
 
             s.activeProvider = targetProvider;
@@ -197,8 +197,8 @@ export default function createGatewayPlugin() {
             applyActiveConfig(ctx, s);
 
             return (
-              `✅ Đã chuyển sang nhà cung cấp: <code>${escapeHtml(targetProvider)}</code>\n` +
-              `• Tài khoản: <code>${escapeHtml(s.activeAccount)}</code>\n` +
+              `Switched to provider: <code>${escapeHtml(targetProvider)}</code>\n` +
+              `• Account: <code>${escapeHtml(s.activeAccount)}</code>\n` +
               `• Model: <code>${escapeHtml(s.activeModel)}</code>`
             );
           }
@@ -210,26 +210,26 @@ export default function createGatewayPlugin() {
               const currentProvider = s.providers[s.activeProvider];
               const accs = currentProvider ? Object.keys(currentProvider.accounts) : [];
               const list = accs.map((a) => {
-                const active = a === s.activeAccount ? ' <b>(đang dùng)</b>' : '';
+                const active = a === s.activeAccount ? ' <b>(active)</b>' : '';
                 return `• <code>${escapeHtml(a)}</code>${active}`;
               });
               return (
-                `<b>👤 Tài khoản trong provider [${escapeHtml(s.activeProvider)}]:</b>\n\n` +
-                (list.length ? list.join('\n') : '<i>Không có tài khoản nào.</i>') +
-                `\n\n<i>Cú pháp: <code>/gateway use &lt;tên_tài_khoản&gt;</code></i>`
+                `<b>Accounts in [${escapeHtml(s.activeProvider)}]:</b>\n\n` +
+                (list.length ? list.join('\n') : '<i>No accounts.</i>') +
+                `\n\n<i>Usage: <code>/gateway use &lt;account&gt;</code></i>`
               );
             }
 
             const currentProvider = s.providers[s.activeProvider];
             if (!currentProvider || !currentProvider.accounts[targetAccount]) {
-              return `❌ Tài khoản <code>${escapeHtml(targetAccount)}</code> không tồn tại trong provider <code>${escapeHtml(s.activeProvider)}</code>.`;
+              return `Account <code>${escapeHtml(targetAccount)}</code> not found in provider <code>${escapeHtml(s.activeProvider)}</code>.`;
             }
 
             s.activeAccount = targetAccount;
             saveStore(s);
             applyActiveConfig(ctx, s);
 
-            return `✅ Đã chuyển sang tài khoản: <code>${escapeHtml(targetAccount)}</code> (Provider: <code>${escapeHtml(s.activeProvider)}</code>).`;
+            return `Switched to account: <code>${escapeHtml(targetAccount)}</code> (Provider: <code>${escapeHtml(s.activeProvider)}</code>)`;
           }
 
           // /gateway add <provider> <baseURL> <account> <apiKey> <model>
@@ -242,9 +242,9 @@ export default function createGatewayPlugin() {
 
             if (!providerName || !baseURL || !accountName || !apiKey || !modelName) {
               return (
-                `<b>Cú pháp thêm:</b>\n` +
+                `<b>Usage:</b>\n` +
                 `<code>/gateway add &lt;provider&gt; &lt;baseURL&gt; &lt;account&gt; &lt;apiKey&gt; &lt;model&gt;</code>\n\n` +
-                `<i>Ví dụ:</i>\n` +
+                `<i>Example:</i>\n` +
                 `<code>/gateway add groq https://api.groq.com/openai/v1 main gsk_xxxx llama-3.3-70b-versatile</code>`
               );
             }
@@ -267,27 +267,27 @@ export default function createGatewayPlugin() {
             saveStore(s);
 
             return (
-              `✅ Đã lưu cấu hình mới:\n` +
+              `Saved new config:\n` +
               `• Provider: <code>${escapeHtml(providerName)}</code>\n` +
               `• Account: <code>${escapeHtml(accountName)}</code>\n` +
               `• Model: <code>${escapeHtml(modelName)}</code>\n\n` +
-              `Chuyển ngay bằng: <code>/gateway providers ${escapeHtml(providerName)}</code>`
+              `Switch now: <code>/gateway providers ${escapeHtml(providerName)}</code>`
             );
           }
 
           // Default status display & help
           const currentP = s.providers[s.activeProvider];
           return (
-            `<b>🌐 AI Gateway Status</b>\n\n` +
+            `<b>AI Gateway Status</b>\n\n` +
             `• <b>Provider:</b> <code>${escapeHtml(s.activeProvider)}</code>\n` +
             `• <b>Account:</b> <code>${escapeHtml(s.activeAccount)}</code>\n` +
             `• <b>Model:</b> <code>${escapeHtml(s.activeModel)}</code>\n` +
             `• <b>Base URL:</b> <code>${escapeHtml(currentP?.baseURL ?? 'default')}</code>\n\n` +
-            `<b>Các lệnh hỗ trợ:</b>\n` +
-            `• <code>/model [tên_model]</code>: Xem hoặc đổi model trong provider hiện tại\n` +
-            `• <code>/gateway providers [tên_provider]</code>: Liệt kê hoặc chuyển nhà cung cấp\n` +
-            `• <code>/gateway use &lt;tên_account&gt;</code>: Chuyển tài khoản trong provider hiện tại\n` +
-            `• <code>/gateway add ...</code>: Thêm provider / account mới`
+            `<b>Commands:</b>\n` +
+            `• <code>/model [name]</code> — View or switch model\n` +
+            `• <code>/gateway providers [name]</code> — List or switch provider\n` +
+            `• <code>/gateway use &lt;account&gt;</code> — Switch account\n` +
+            `• <code>/gateway add ...</code> — Add provider / account`
           );
         },
       },

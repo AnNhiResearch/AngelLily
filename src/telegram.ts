@@ -60,6 +60,8 @@ export interface TelegramClient {
     command: string,
     execute?: (command: string) => Promise<{ ok: boolean; output: string }>,
   ): Promise<CommandApproval>;
+  /** Register bot commands via the Telegram setMyCommands API. */
+  setMyCommands(commands: { command: string; description: string }[]): Promise<void>;
 }
 
 interface TgChat {
@@ -582,5 +584,12 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
       controller?.abort();
     },
     requestApproval,
+    async setMyCommands(commands: { command: string; description: string }[]): Promise<void> {
+      try {
+        await post(token, 'setMyCommands', { commands });
+      } catch (err) {
+        console.error('[telegram] setMyCommands failed:', err);
+      }
+    },
   };
 }
