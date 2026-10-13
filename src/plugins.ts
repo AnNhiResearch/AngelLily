@@ -102,10 +102,29 @@ export interface PluginRuntime {
 const LIST_FILE = 'plugins.json';
 const RPC_TIMEOUT_MS = 60_000;
 
+/**
+ * Official / trusted plugins that run in the main process (no fork).
+ * Only @angellily-scoped packages should appear here.  Plugins NOT on this
+ * list always run in the isolated child-process runner regardless of what
+ * plugins.json says — this is a security boundary.
+ */
+const TRUSTED_PLUGINS: ReadonlySet<string> = new Set([
+  '@angellily/plugin-ai-gateway',
+]);
+
 interface PluginConfig {
   spec: string;
-  /** Trusted plugins run in the main process (no fork, full context). */
-  inProcess?: boolean;
+}
+
+/** Resolve the npm package name for a spec (local path → read package.json). */
+function resolvePackageName(spec: string, cwd: string): string | undefined {
+  if (!IS_LOCAL.test(spec)) return spec; // already an npm name
+  const dir = resolve(cwd, spec);
+  try {
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+    if (typeof pkg.name === 'string') return pkg.name;
+  } catch {}
+  return undefined;
 }
 
 function readList(cwd: string): PluginConfig[] {
@@ -116,9 +135,9 @@ function readList(cwd: string): PluginConfig[] {
     }
     return parsed.map((entry): PluginConfig => {
       if (typeof entry === 'string') return { spec: entry };
-      const obj = entry as { package?: unknown; inProcess?: unknown };
+      const obj = entry as { package?: unknown };
       if (entry && typeof entry === 'object' && typeof obj.package === 'string') {
-        return { spec: obj.package, inProcess: obj.inProcess === true };
+        return { spec: obj.package };
       }
       throw new Error('each entry must be a package name or an object with a "package" field');
     });
@@ -169,8 +188,17 @@ export async function loadPlugins(
     return createRuntime([]);
   }
 
-  const inProcessConfigs = configs.filter((c) => c.inProcess);
-  const runnerConfigs = configs.filter((c) => !c.inProcess);
+  // Split by hardcoded whitelist — plugin cannot opt itself in
+  const inProcessConfigs: PluginConfig[] = [];
+  const runnerConfigs: PluginConfig[] = [];
+  for (const cfg of configs) {
+    const pkgName = resolvePackageName(cfg.spec, cwd);
+    if (pkgName && TRUSTED_PLUGINS.has(pkgName)) {
+      inProcessConfigs.push(cfg);
+    } else {
+      runnerConfigs.push(cfg);
+    }
+  }
 
   // --- In-process plugins: import directly, full context ---
   const inProcessPlugins: AngelPlugin[] = [];
