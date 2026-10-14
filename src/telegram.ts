@@ -1,4 +1,5 @@
 // Raw Telegram Bot API over fetch — zero dependencies (Node 18+).
+import { createServer, type Server } from 'node:http';
 import type { Auth } from './auth.js';
 import { t } from './i18n.js';
 
@@ -42,6 +43,14 @@ export interface TelegramOptions {
   onExternalCommand?: (chatId: number, text: string) => Promise<string | null>;
   /** Runs an already-approved shell command (wired to shell.run in main). */
   runCommand?: (command: string) => Promise<{ ok: boolean; output: string }>;
+  /** Transport mode: 'polling' (default) or 'webhook'. */
+  mode?: 'polling' | 'webhook';
+  /** Public HTTPS URL for webhook (e.g. https://www.angellily.2bd.net/telegram). */
+  webhookUrl?: string;
+  /** Port for webhook HTTP server (default: 3000). */
+  webhookPort?: number;
+  /** Secret token sent by Telegram in X-Telegram-Bot-Api-Secret-Token. Optional. */
+  webhookSecret?: string;
 }
 
 export interface CommandApproval {
@@ -541,6 +550,19 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
     chatChains.set(chatId, next);
   }
 
+  const mode = opts.mode ?? 'webhook';
+  let server: Server | null = null;
+
+  async function processUpdate(update: TgUpdate): Promise<void> {
+    if (update.callback_query) {
+      await handleCallback(update.callback_query);
+    }
+    const msg = update.message;
+    if (msg) {
+      enqueueMessage(msg.chat.id, () => handleMessage(msg));
+    }
+  }
+
   async function pollLoop(): Promise<void> {
     let offset = 0;
     while (running) {
@@ -558,15 +580,7 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
         );
         for (const update of updates) {
           offset = update.update_id + 1;
-          // Callbacks (Chạy/Hủy) must never wait: handling them here even
-          // while an answer is in progress is the whole point.
-          if (update.callback_query) {
-            await handleCallback(update.callback_query);
-          }
-          const msg = update.message;
-          if (msg) {
-            enqueueMessage(msg.chat.id, () => handleMessage(msg));
-          }
+          await processUpdate(update);
         }
       } catch (err) {
         if (!running) break; // aborted by stop()
@@ -576,12 +590,83 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
     }
   }
 
-  void pollLoop();
+  async function startWebhook(): Promise<void> {
+    const port = opts.webhookPort ?? 3000;
+    const url = opts.webhookUrl;
+    if (!url) {
+      throw new Error('[telegram] webhook mode requires webhookUrl (e.g. TELEGRAM_WEBHOOK_URL)');
+    }
+
+    server = createServer((req, res) => {
+      if (req.method !== 'POST') {
+        res.writeHead(405).end('Method Not Allowed');
+        return;
+      }
+
+      if (opts.webhookSecret) {
+        const headerSecret = req.headers['x-telegram-bot-api-secret-token'];
+        if (headerSecret !== opts.webhookSecret) {
+          res.writeHead(403).end('Forbidden');
+          return;
+        }
+      }
+
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 1024 * 1024) {
+          req.destroy();
+        }
+      });
+
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'text/plain' }).end('OK');
+        if (!body.trim()) return;
+        try {
+          const update = JSON.parse(body) as TgUpdate;
+          console.log(`[telegram] received webhook update_id: ${update.update_id}`);
+          void processUpdate(update);
+        } catch (err) {
+          console.error('[telegram] failed to parse webhook update:', err, 'raw:', body);
+        }
+      });
+    });
+
+    server.listen(port, () => {
+      console.log(`[telegram] webhook listening on port ${port}`);
+    });
+
+    try {
+      const params: Record<string, string> = {
+        url,
+        allowed_updates: '["message","callback_query"]',
+      };
+      if (opts.webhookSecret) {
+        params.secret_token = opts.webhookSecret;
+      }
+      await post(token, 'setWebhook', params);
+      console.log(`[telegram] webhook configured at ${url}`);
+    } catch (err) {
+      console.error('[telegram] failed to register setWebhook:', err);
+    }
+  }
+
+  if (mode === 'webhook') {
+    void startWebhook();
+  } else {
+    void pollLoop();
+  }
 
   return {
     stop(): void {
       running = false;
       controller?.abort();
+      if (server) {
+        server.close();
+      }
+      if (mode === 'webhook') {
+        post(token, 'deleteWebhook', { drop_pending_updates: 'false' }).catch(() => {});
+      }
     },
     requestApproval,
     async setMyCommands(commands: { command: string; description: string }[]): Promise<void> {

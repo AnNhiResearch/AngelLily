@@ -197,9 +197,18 @@ realAI = ai;
 // Initialize plugins (e.g. ai-gateway loads active provider/account/model from gateways.json)
 await plugins.init({ chatId: 0, locale, ai: aiProxy });
 
+const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL;
+const webhookPort = Number(process.env.TELEGRAM_WEBHOOK_PORT) || 3000;
+const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+const transportMode = process.env.TELEGRAM_TRANSPORT === 'polling' ? 'polling' : (webhookUrl ? 'webhook' : 'polling');
+
 telegram = startTelegram({
   token,
   auth,
+  mode: transportMode,
+  webhookUrl,
+  webhookPort,
+  webhookSecret,
   runCommand: (command) => shell.run(command),
   onExternalCommand: async (chatId, text) => {
     const match = plugins.matchCommand(text);

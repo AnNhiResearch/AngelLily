@@ -112,6 +112,10 @@ npx @angellily/app --init
 | `OPENAI_MODEL` | `gpt-4o-mini` | Tên model gửi lên API |
 | `MAX_HISTORY` | `10` | Số tin nhắn giữ mỗi chat (cũ hơn bị bỏ) |
 | `BOT_LANGUAGE` | `vi` | Ngôn ngữ giao diện: `en` hoặc `vi` |
+| `TELEGRAM_TRANSPORT` | `polling` (hoặc `webhook` nếu có URL) | Chế độ: `polling` hoặc `webhook` |
+| `TELEGRAM_WEBHOOK_URL` | *(tùy chọn)* | URL HTTPS Webhook (ví dụ: `https://example.com/telegram`) |
+| `TELEGRAM_WEBHOOK_PORT` | `3000` | Port HTTP server nhận webhook cục bộ |
+| `TELEGRAM_WEBHOOK_SECRET` | *(tùy chọn)* | Secret token kiểm tra qua header `X-Telegram-Bot-Api-Secret-Token` |
 
 ## Tùy biến persona
 

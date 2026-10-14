@@ -112,6 +112,10 @@ npx @angellily/app --init
 | `OPENAI_MODEL` | `gpt-4o-mini` | Model name sent to the API |
 | `MAX_HISTORY` | `10` | Messages kept per chat (older ones are dropped) |
 | `BOT_LANGUAGE` | `vi` | UI language: `en` or `vi` |
+| `TELEGRAM_TRANSPORT` | `polling` (or `webhook` if url is set) | Mode: `polling` or `webhook` |
+| `TELEGRAM_WEBHOOK_URL` | *(optional)* | Webhook HTTPS URL (e.g. `https://example.com/telegram`) |
+| `TELEGRAM_WEBHOOK_PORT` | `3000` | Port for local webhook HTTP server |
+| `TELEGRAM_WEBHOOK_SECRET` | *(optional)* | Secret token checked against `X-Telegram-Bot-Api-Secret-Token` |
 
 ## Customizing the Persona
 
