@@ -11,6 +11,7 @@ const VI = {
       'Lệnh:',
       '/start - hướng dẫn',
       '/clear - xóa hội thoại (bắt đầu lại)',
+      '/plugin - quản lý plugin',
       '',
       `Chat ID của bạn: ${chatId}`,
     ].join('\n'),
@@ -40,6 +41,17 @@ const VI = {
   errRate: 'Quá nhiều yêu cầu. Thử lại sau.',
   errConn: 'Không kết nối được API. Kiểm tra BASE_URL.',
   errGeneric: 'Có lỗi xảy ra khi xử lý tin nhắn.',
+  pluginListHeader: 'Danh sách Plugin:',
+  pluginEmpty: 'Chưa có plugin nào được cài đặt.',
+  pluginStatusEnabled: 'BẬT',
+  pluginStatusDisabled: 'TẮT',
+  pluginVerified: 'Đã xác minh',
+  pluginUsage: '\nCú pháp:\n/plugin enable <tên>\n/plugin disable <tên>',
+  pluginEnabled: (name: string) => `Đã BẬT plugin "${name}".`,
+  pluginDisabled: (name: string) => `Đã TẮT plugin "${name}".`,
+  pluginNotFound: (name: string) => `Không tìm thấy plugin "${name}".`,
+  pluginInspectApproval: 'AI yêu cầu truy cập danh sách các plugin và công cụ hiện có.',
+  pluginInspectRejected: 'Người dùng từ chối cấp quyền truy cập thông tin plugin cho AI.',
 };
 
 const EN: typeof VI = {
@@ -50,6 +62,7 @@ const EN: typeof VI = {
       'Commands:',
       '/start - help',
       '/clear - clear the conversation (start over)',
+      '/plugin - manage plugins',
       '',
       `Your chat ID: ${chatId}`,
     ].join('\n'),
@@ -79,6 +92,17 @@ const EN: typeof VI = {
   errRate: 'Too many requests. Try again later.',
   errConn: 'Cannot reach the API. Check BASE_URL.',
   errGeneric: 'Something went wrong while handling the message.',
+  pluginListHeader: 'Plugin List:',
+  pluginEmpty: 'No plugins currently installed.',
+  pluginStatusEnabled: 'ENABLED',
+  pluginStatusDisabled: 'DISABLED',
+  pluginVerified: 'Verified',
+  pluginUsage: '\nUsage:\n/plugin enable <name>\n/plugin disable <name>',
+  pluginEnabled: (name: string) => `Plugin "${name}" is now ENABLED.`,
+  pluginDisabled: (name: string) => `Plugin "${name}" is now DISABLED.`,
+  pluginNotFound: (name: string) => `Plugin "${name}" not found.`,
+  pluginInspectApproval: 'AI is requesting access to inspect available plugins and tools.',
+  pluginInspectRejected: 'The user refused to grant plugin inspection permission to the AI.',
 };
 
 export const t: typeof VI =

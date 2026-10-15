@@ -39,6 +39,7 @@ export interface PluginManifest {
 
 export interface AngelPlugin {
   name: string;
+  description?: string;
   manifest?: PluginManifest;
   systemPrompt?: string;
   commands?: PluginCommand[];
@@ -74,6 +75,7 @@ export interface RunnerRegisterMsg {
   type: 'register';
   plugins: {
     name: string;
+    description?: string;
     systemPrompt?: string;
     commands: { command: string; description?: string }[];
     tools: { name: string; description: string; approval?: boolean }[];
@@ -187,9 +189,21 @@ async function handleInit(specs: string[], cwd: string): Promise<void> {
         continue;
       }
 
+      let description = plugin.description;
+      if (!description && IS_LOCAL.test(spec)) {
+        try {
+          const pkgPath = join(resolve(cwd, spec), 'package.json');
+          if (existsSync(pkgPath)) {
+            const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+            if (typeof pkg.description === 'string') description = pkg.description;
+          }
+        } catch {}
+      }
+
       loadedPlugins.set(plugin.name, plugin);
       registered.push({
         name: plugin.name,
+        description,
         systemPrompt: plugin.systemPrompt,
         commands: (plugin.commands ?? []).map((c) => ({ command: c.command, description: c.description })),
         tools: (plugin.tools ?? []).map((t) => ({

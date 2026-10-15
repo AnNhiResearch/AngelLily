@@ -95,6 +95,12 @@ interface TgUpdate {
   callback_query?: TgCallbackQuery;
 }
 
+interface TgWebhookInfo {
+  url: string;
+  has_custom_certificate: boolean;
+  pending_update_count: number;
+}
+
 interface TgResponse<T> {
   ok: boolean;
   result?: T;
@@ -168,8 +174,7 @@ async function callApi<T>(
   return data.result;
 }
 
-// POST with one automatic retry honoring Telegram's 429 retry_after.
-async function post<T>(token: string, method: string, body: unknown): Promise<T> {
+async function post<T>(token: string, method: string, body: unknown, retries = 2): Promise<T> {
   const init: RequestInit = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -179,17 +184,33 @@ async function post<T>(token: string, method: string, body: unknown): Promise<T>
     return await callApi<T>(token, method, undefined, init);
   } catch (err) {
     const retryAfter = (err as { retryAfter?: number }).retryAfter;
-    if (!retryAfter) throw err;
-    await sleep(retryAfter * 1000);
-    return callApi<T>(token, method, undefined, init);
+    if (retryAfter) {
+      await sleep(retryAfter * 1000);
+      return callApi<T>(token, method, undefined, init);
+    }
+    const isNetworkError =
+      (err as { code?: string }).code === 'ECONNRESET' ||
+      (err as { code?: string }).code === 'ETIMEDOUT' ||
+      (err as { code?: string }).code === 'ECONNABORTED' ||
+      /fetch failed/i.test((err as Error)?.message || '');
+    if (retries > 0 && isNetworkError) {
+      await sleep(1000);
+      return post<T>(token, method, body, retries - 1);
+    }
+    throw err;
   }
 }
 
-function sendChatAction(token: string, chatId: number): Promise<void> {
-  return post(token, 'sendChatAction', { chat_id: chatId, action: 'typing' }).then(() => undefined);
-}
+  function sendChatAction(token: string, chatId: number): Promise<void> {
+    return post(token, 'sendChatAction', { chat_id: chatId, action: 'typing' })
+      .then(() => undefined)
+      .catch((err) => {
+        console.warn(`[telegram] sendChatAction typing failed for chat ${chatId}:`, err?.message ?? err);
+      });
+  }
 
 async function send(token: string, chatId: number, text: string, parseMode?: 'HTML'): Promise<void> {
+  if (!text || !text.trim()) return;
   for (const chunk of splitForTelegram(text)) {
     await postText(token, 'sendMessage', { chat_id: chatId }, chunk, parseMode);
   }
@@ -217,6 +238,7 @@ async function postText<T>(
 
 // Send one message, return its id for later edits.
 function sendOnce(token: string, chatId: number, text: string, parseMode?: 'HTML'): Promise<number> {
+  if (!text || !text.trim()) return Promise.resolve(0);
   return postText<TgMessage>(token, 'sendMessage', { chat_id: chatId }, text, parseMode)
     .then((m) => m.message_id);
 }
@@ -228,6 +250,7 @@ function editText(
   text: string,
   parseMode?: 'HTML',
 ): Promise<void> {
+  if (!text || !text.trim()) return Promise.resolve();
   return postText(
     token,
     'editMessageText',
@@ -383,7 +406,7 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
           pending = acc.slice(committedLen);
         }
         // Update or open the live preview with what remains.
-        if (pending && pending !== shown) {
+        if (pending && pending.trim() && pending !== shown) {
           try {
             if (liveId === null) {
               liveId = await sendOnce(token, chatId, pending, 'HTML');
@@ -415,7 +438,7 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
     // so the next round opens as a new message below the command result.
     const finalizePreview = (): Promise<void> => {
       const next = chain.then(async () => {
-        if (acc && acc !== shown) {
+        if (acc && acc.trim() && acc !== shown) {
           if (liveId === null) {
             liveId = await sendOnce(token, chatId, acc, 'HTML');
           } else {
@@ -559,11 +582,23 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
     }
     const msg = update.message;
     if (msg) {
+      if (opts.auth.isOwner(msg.chat.id) && msg.text && !msg.text.startsWith('/')) {
+        sendChatAction(token, msg.chat.id);
+      }
       enqueueMessage(msg.chat.id, () => handleMessage(msg));
     }
   }
 
   async function pollLoop(): Promise<void> {
+    try {
+      const info = await callApi<TgWebhookInfo>(token, 'getWebhookInfo', undefined);
+      if (info && info.url) {
+        await post(token, 'deleteWebhook', { drop_pending_updates: 'false' });
+        console.log(`[telegram] webhook was active (${info.url}), deleted for polling mode`);
+      }
+    } catch (err) {
+      console.warn('[telegram] failed to inspect or delete webhook before polling:', err);
+    }
     let offset = 0;
     while (running) {
       controller = new AbortController();

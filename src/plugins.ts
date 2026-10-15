@@ -3,7 +3,7 @@
 // with a clean environment (no bot tokens, no API keys), capability-based shell
 // and config file access.
 
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { fork, type ChildProcess } from 'node:child_process';
@@ -66,6 +66,8 @@ export interface PluginHooks {
 export interface AngelPlugin {
   /** Unique plugin name. The first plugin wins on name conflicts. */
   name: string;
+  /** Short description of the plugin and its purpose. */
+  description?: string;
   manifest?: PluginManifest;
   /** Passive: appended to the system prompt for every session. */
   systemPrompt?: string;
@@ -89,7 +91,19 @@ export interface PluginRuntimeOptions {
   };
 }
 
+export interface PluginStatus {
+  name: string;
+  description?: string;
+  enabled: boolean;
+  verified: boolean;
+  commands?: { command: string; description?: string }[];
+}
+
 export interface PluginRuntime {
+  listStatus(): PluginStatus[];
+  enable(name: string): boolean;
+  disable(name: string): boolean;
+  isEnabled(name: string): boolean;
   readonly names: readonly string[];
   /** Register / run startup hooks for plugins. */
   init(ctx: PluginContext): Promise<void>;
@@ -193,7 +207,7 @@ export async function loadPlugins(
 ): Promise<PluginRuntime> {
   const configs = readList(cwd);
   if (configs.length === 0) {
-    return createRuntime([]);
+    return createRuntime([], cwd, new Set());
   }
 
   // Split by hardcoded whitelist — plugin cannot opt itself in
@@ -239,8 +253,20 @@ export async function loadPlugins(
         },
       }));
 
+      let description = plugin.description;
+      if (!description && IS_LOCAL.test(cfg.spec)) {
+        try {
+          const pkgPath = join(resolve(cwd, cfg.spec), 'package.json');
+          if (existsSync(pkgPath)) {
+            const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+            if (typeof pkg.description === 'string') description = pkg.description;
+          }
+        } catch {}
+      }
+
       inProcessPlugins.push({
         ...plugin,
+        description,
         commands: wrappedCommands,
         tools: wrappedTools,
       });
@@ -252,7 +278,8 @@ export async function loadPlugins(
 
   // --- Runner plugins: fork child process for isolation ---
   if (runnerConfigs.length === 0) {
-    return createRuntime(inProcessPlugins);
+    const trustedNames = new Set(inProcessPlugins.map((p) => p.name));
+    return createRuntime(inProcessPlugins, cwd, trustedNames);
   }
 
   // Create isolated environment for runner: exclude secrets
@@ -409,6 +436,7 @@ export async function loadPlugins(
     console.log(`[plugins] loaded: ${p.name} (isolated runner)`);
     return {
       name: p.name,
+      description: p.description,
       ...(p.systemPrompt ? { systemPrompt: p.systemPrompt } : {}),
       commands: p.commands.map((c) => ({
         command: c.command,
@@ -425,8 +453,9 @@ export async function loadPlugins(
   });
 
   // Merge: in-process plugins first (higher priority), then runner plugins
+  const trustedNames = new Set(inProcessPlugins.map((p) => p.name));
   const allPlugins = [...inProcessPlugins, ...pluginList];
-  const runtime = createRuntime(allPlugins);
+  const runtime = createRuntime(allPlugins, cwd, trustedNames);
   return {
     ...runtime,
     stop: () => {
@@ -438,21 +467,78 @@ export async function loadPlugins(
   };
 }
 
-function createRuntime(list: AngelPlugin[]): PluginRuntime {
-  const commands = new Map<string, PluginCommand>();
-  const tools = new Map<string, PluginTool>();
+const STATE_DIR = '.angellily';
+const STATE_FILE = '.angellily/plugins-state.json';
+
+function readDisabledPlugins(cwd: string = process.cwd()): Set<string> {
+  const filePath = resolve(cwd, STATE_FILE);
+  if (!existsSync(filePath)) return new Set();
+  try {
+    const raw = JSON.parse(readFileSync(filePath, 'utf8'));
+    if (Array.isArray(raw?.disabled)) {
+      return new Set(raw.disabled.map((x: unknown) => String(x)));
+    }
+  } catch {}
+  return new Set();
+}
+
+function writeDisabledPlugins(disabled: Set<string>, cwd: string = process.cwd()): void {
+  try {
+    const dirPath = resolve(cwd, STATE_DIR);
+    if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
+    const filePath = resolve(cwd, STATE_FILE);
+    writeFileSync(filePath, JSON.stringify({ disabled: [...disabled] }, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[plugins] failed to write state file:', err);
+  }
+}
+
+function createRuntime(list: AngelPlugin[], cwd: string = process.cwd(), trustedNames: Set<string> = new Set()): PluginRuntime {
+  const disabled = readDisabledPlugins(cwd);
+  const commands = new Map<string, { plugin: AngelPlugin; command: PluginCommand }>();
+  const tools = new Map<string, { plugin: AngelPlugin; tool: PluginTool }>();
+
   for (const plugin of list) {
     for (const command of plugin.commands ?? []) {
-      if (!commands.has(command.command)) commands.set(command.command, command);
+      if (!commands.has(command.command)) commands.set(command.command, { plugin, command });
     }
     for (const tool of plugin.tools ?? []) {
-      if (!tools.has(tool.name)) tools.set(tool.name, tool);
+      if (!tools.has(tool.name)) tools.set(tool.name, { plugin, tool });
     }
   }
-  const hooks = list.map((p) => p.hooks).filter((h): h is PluginHooks => !!h);
+
+  const activePlugins = () => list.filter((p) => !disabled.has(p.name));
 
   return {
     names: list.map((p) => p.name),
+    listStatus: () =>
+      list.map((p) => ({
+        name: p.name,
+        description: p.description,
+        enabled: !disabled.has(p.name),
+        verified: trustedNames.has(p.name),
+        commands: (p.commands ?? []).map((c) => ({
+          command: c.command,
+          description: c.description,
+        })),
+      })),
+    isEnabled: (name: string) => list.some((p) => p.name === name) && !disabled.has(name),
+    enable: (name: string) => {
+      if (!list.some((p) => p.name === name)) return false;
+      if (disabled.has(name)) {
+        disabled.delete(name);
+        writeDisabledPlugins(disabled, cwd);
+      }
+      return true;
+    },
+    disable: (name: string) => {
+      if (!list.some((p) => p.name === name)) return false;
+      if (!disabled.has(name)) {
+        disabled.add(name);
+        writeDisabledPlugins(disabled, cwd);
+      }
+      return true;
+    },
     init: async (ctx) => {
       for (const p of list) {
         if (p.init) {
@@ -465,27 +551,36 @@ function createRuntime(list: AngelPlugin[]): PluginRuntime {
       }
     },
     systemPrompt: () =>
-      list
+      activePlugins()
         .map((p) => p.systemPrompt?.trim())
         .filter((s): s is string => !!s)
         .join('\n\n'),
-    toolInfos: () => [...tools.values()].map((t) => ({ name: t.name, description: t.description })),
-    getTool: (name) => tools.get(name),
+    toolInfos: () =>
+      [...tools.values()]
+        .filter((entry) => !disabled.has(entry.plugin.name))
+        .map((entry) => ({ name: entry.tool.name, description: entry.tool.description })),
+    getTool: (name) => {
+      const entry = tools.get(name);
+      if (!entry || disabled.has(entry.plugin.name)) return undefined;
+      return entry.tool;
+    },
     commandInfos: () =>
-      [...commands.values()].map((c) => ({
-        command: c.command,
-        description: c.description ?? c.command,
-      })),
+      [...commands.values()]
+        .filter((entry) => !disabled.has(entry.plugin.name))
+        .map((entry) => ({
+          command: entry.command.command,
+          description: entry.command.description ?? entry.command.command,
+        })),
     matchCommand: (text) => {
       const m = text.match(/^([/#])([A-Za-z0-9_-]+)(?:\s+([\s\S]*))?$/);
-      const command = m ? commands.get(m[2]) : undefined;
-      if (!m || !command) return undefined;
-      return { command, args: (m[3] ?? '').trim() };
+      const entry = m ? commands.get(m[2]) : undefined;
+      if (!m || !entry || disabled.has(entry.plugin.name)) return undefined;
+      return { command: entry.command, args: (m[3] ?? '').trim() };
     },
     applyIncoming: (text, ctx) => {
       let t = text;
-      for (const h of hooks) {
-        const out = h.onIncoming?.(t, ctx);
+      for (const p of activePlugins()) {
+        const out = p.hooks?.onIncoming?.(t, ctx);
         if (out === null) return null;
         if (typeof out === 'string') t = out;
       }
@@ -493,12 +588,16 @@ function createRuntime(list: AngelPlugin[]): PluginRuntime {
     },
     applyOutgoing: (text, ctx) => {
       let t = text;
-      for (const h of hooks) t = h.onOutgoing?.(t, ctx) ?? t;
+      for (const p of activePlugins()) {
+        t = p.hooks?.onOutgoing?.(t, ctx) ?? t;
+      }
       return t;
     },
     applyShellCommand: (command, ctx) => {
       let t = command;
-      for (const h of hooks) t = h.onShellCommand?.(t, ctx) ?? t;
+      for (const p of activePlugins()) {
+        t = p.hooks?.onShellCommand?.(t, ctx) ?? t;
+      }
       return t;
     },
   };

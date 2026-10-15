@@ -27,7 +27,8 @@ export interface AIOptions {
   /** Extra system prompt appended after the base prompt (from plugins). */
   extraSystem?: string;
   /** Plugin tools the LLM may invoke with <tool name="...">input</tool>. */
-  tools?: { name: string; description: string }[];
+  tools?: { name: string; description: string }[] | (() => { name: string; description: string }[]);
+  extraSystemPrompt?: () => string | undefined;
   /**
    * Executes a plugin tool. The result (or the denial) comes back as the next
    * user message and the LLM continues.
@@ -128,12 +129,14 @@ export function createAI(opts: AIOptions): AI {
     } else {
       s = `Underlying model: ${model}.`;
     }
-    s += opts.extraSystem ? `\n\n${opts.extraSystem}` : '';
+    const extra = opts.extraSystemPrompt ? opts.extraSystemPrompt() : opts.extraSystem;
+    s += extra ? ('\n\n' + extra) : '';
     if (opts.runCommand) {
       s += SHELL_PROMPT.replace('{ENV}', opts.environment ?? 'unknown');
     }
-    if (opts.runTool && opts.tools?.length) {
-      s += toolsPrompt(opts.tools);
+    const currentTools = typeof opts.tools === 'function' ? opts.tools() : opts.tools;
+    if (opts.runTool && currentTools && currentTools.length > 0) {
+      s += toolsPrompt(currentTools);
     }
     return s;
   }
@@ -265,7 +268,7 @@ export function createAI(opts: AIOptions): AI {
   async function streamOnce(h: Message[], onPartial?: (acc: string) => void): Promise<string> {
     const stream = await client.chat.completions.create({
       model,
-      messages: [{ role: 'system', content: system }, ...h],
+      messages: [{ role: 'system', content: buildSystem() }, ...h],
       stream: true,
     });
     let reply = '';

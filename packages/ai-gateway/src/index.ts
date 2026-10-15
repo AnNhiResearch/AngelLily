@@ -192,6 +192,7 @@ export default function createGatewayPlugin() {
 
   return {
     name: 'ai-gateway',
+    description: 'Dynamic AI provider, account, and model gateway for AngelLily',
     init: (ctx: PluginContext) => {
       const s = ensureStore(ctx);
       applyActiveConfig(ctx, s);

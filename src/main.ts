@@ -153,7 +153,7 @@ const ai = createAI({
   maxHistory: Number.isFinite(maxHistory) && maxHistory > 0 ? maxHistory : undefined,
   system: `${loadSystemPrompt()}\n\nUnderlying model: ${process.env.OPENAI_MODEL ?? 'gpt-4o-mini'}.`,
   environment: shell.describe(),
-  extraSystem: plugins.systemPrompt() || undefined,
+  extraSystemPrompt: () => plugins.systemPrompt() || '',
   runCommand: (sessionId, command) => {
     const chatId = Number(sessionId);
     const finalCommand = plugins.applyShellCommand(command, { chatId, locale });
@@ -161,9 +161,42 @@ const ai = createAI({
       ? telegram.requestApproval(chatId, finalCommand)
       : Promise.resolve({ approved: false, output: '' });
   },
-  tools: plugins.toolInfos(),
+  tools: () => [
+    {
+      name: 'inspect_plugins',
+      description: 'Request permission to inspect available installed plugins, their descriptions, user-only commands (which only the user can run), and available AI tools.',
+    },
+    ...plugins.toolInfos(),
+  ],
   runTool: async (sessionId, name, input) => {
     const chatId = Number(sessionId);
+    if (name === 'inspect_plugins') {
+      if (!telegram) return { approved: false, output: '' };
+      return await telegram.requestApproval(
+        chatId,
+        t.pluginInspectApproval,
+        async () => {
+          const list = plugins.listStatus();
+          const tools = plugins.toolInfos();
+          const info = [
+            'Installed plugins:',
+            ...list.map((p) => {
+              const desc = p.description ? ` - ${p.description}` : '';
+              const cmds = p.commands && p.commands.length > 0
+                ? `\n    User-only commands: ${p.commands.map((c) => `/${c.command}${c.description ? ` (${c.description})` : ''}`).join(', ')}`
+                : '';
+              return `- ${p.name}${p.verified ? ' (VERIFIED)' : ''} [${p.enabled ? 'ACTIVE' : 'DISABLED'}]${desc}${cmds}`;
+            }),
+            '',
+            'Active plugin tools (callable by AI):',
+            ...(tools.length ? tools.map((t) => '- ' + t.name + ': ' + t.description) : ['(none)']),
+            '',
+            'Note: Some plugins only provide user-only commands (e.g. /gateway, /model) for user-driven configuration. You (the AI) cannot execute user-only commands directly, but you can suggest them to the user.',
+          ].join('\n');
+          return { ok: true, output: info };
+        },
+      );
+    }
     const tool = plugins.getTool(name);
     if (!tool) return { approved: false, output: t.noTool(name) };
     const toolCtx = {
@@ -211,6 +244,30 @@ telegram = startTelegram({
   webhookSecret,
   runCommand: (command) => shell.run(command),
   onExternalCommand: async (chatId, text) => {
+    const trimmed = text.trim();
+    if (trimmed === '/plugin' || trimmed.startsWith('/plugin ')) {
+      const parts = trimmed.split(/\s+/);
+      const action = (parts[1] ?? '').toLowerCase();
+      const target = parts[2] ?? '';
+      if (action === 'enable' && target) {
+        const ok = plugins.enable(target);
+        if (!ok) return t.pluginNotFound(target);
+        return t.pluginEnabled(target);
+      }
+      if (action === 'disable' && target) {
+        const ok = plugins.disable(target);
+        if (!ok) return t.pluginNotFound(target);
+        return t.pluginDisabled(target);
+      }
+      const list = plugins.listStatus();
+      if (list.length === 0) return t.pluginEmpty;
+      const lines = [
+        t.pluginListHeader,
+        ...list.map((p, idx) => `${idx + 1}. ${p.name}${p.verified ? ` (${t.pluginVerified})` : ''} [${p.enabled ? t.pluginStatusEnabled : t.pluginStatusDisabled}]`),
+        t.pluginUsage,
+      ];
+      return lines.join('\n');
+    }
     const match = plugins.matchCommand(text);
     if (!match) return null;
     try {
@@ -250,6 +307,7 @@ console.log(`Plugins: ${plugins.names.length ? plugins.names.join(', ') : '(none
 const builtinCommands = [
   { command: 'start', description: 'Show help' },
   { command: 'clear', description: 'Clear conversation' },
+  { command: 'plugin', description: 'Manage plugins' },
 ];
 const allCommands = [...builtinCommands, ...plugins.commandInfos()];
 telegram.setMyCommands(allCommands).catch(() => {});
