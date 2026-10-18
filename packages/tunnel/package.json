@@ -1,0 +1,13 @@
+{
+  "name": "@angellily/plugin-tunnel",
+  "version": "0.0.3",
+  "description": "Zero-config public URL for Mini Apps (and webhook) via SSH tunnel — localhost.run or serveo",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

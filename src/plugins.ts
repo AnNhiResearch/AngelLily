@@ -11,7 +11,6 @@ import type {
   HostToRunner,
   RunnerToHost,
   RunnerRegisterMsg,
-  RunnerResultMsg,
   RunnerHostRequestMsg,
   PluginManifest,
 } from './plugin_runner.js';
@@ -28,6 +27,11 @@ export interface PluginContext {
   /** Optional config reader scoped to plugin */
   config?: {
     read(filename: string): Promise<string>;
+  };
+  /** Mini App host for verified plugins (e.g. telegram-mini-apps). */
+  miniapp?: {
+    getPublicUrl(appId: string): string | null;
+    sendButton(chatId: number, appId: string, title: string): Promise<void>;
   };
   /** AI controller for in-process plugins (e.g. ai-gateway). */
   ai?: {
@@ -84,6 +88,11 @@ export interface AngelPlugin {
 export interface PluginRuntimeOptions {
   onShellRequest?: (pluginName: string, command: string, chatId: number) => Promise<{ ok: boolean; output: string }>;
   onReadConfig?: (pluginName: string, filename: string) => Promise<string>;
+  /** Mini App host exposed to in-process (verified) plugins. */
+  miniapp?: {
+    getPublicUrl(appId: string): string | null;
+    sendButton(chatId: number, appId: string, title: string): Promise<void>;
+  };
   /** AI controller exposed to in-process plugins (e.g. ai-gateway). */
   ai?: {
     setConfig(config: { apiKey?: string; baseURL?: string; model?: string }): void;
@@ -132,6 +141,8 @@ const RPC_TIMEOUT_MS = 60_000;
  */
 const TRUSTED_PLUGINS: ReadonlySet<string> = new Set([
   '@angellily/plugin-ai-gateway',
+  '@angellily/plugin-telegram-mini-apps',
+  '@angellily/plugin-tunnel',
 ]);
 
 interface PluginConfig {
@@ -237,18 +248,18 @@ export async function loadPlugins(
         continue;
       }
 
-      // Wrap commands/tools to inject full context (ai, shell, config)
+      // Wrap commands/tools to inject full context (ai, miniapp, shell, config)
       const wrappedCommands: PluginCommand[] = (plugin.commands ?? []).map((c) => ({
         ...c,
         run: (args: string, ctx: PluginContext) => {
-          const richCtx: PluginContext = { ...ctx, ai: options.ai };
+          const richCtx: PluginContext = { ...ctx, ai: options.ai, miniapp: options.miniapp };
           return c.run(args, richCtx as any);
         },
       }));
       const wrappedTools: PluginTool[] = (plugin.tools ?? []).map((t) => ({
         ...t,
         run: (input: string, ctx: PluginContext) => {
-          const richCtx: PluginContext = { ...ctx, ai: options.ai };
+          const richCtx: PluginContext = { ...ctx, ai: options.ai, miniapp: options.miniapp };
           return t.run(input, richCtx as any);
         },
       }));

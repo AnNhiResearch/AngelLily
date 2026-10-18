@@ -141,8 +141,6 @@ export function createAI(opts: AIOptions): AI {
     return s;
   }
 
-  let system = buildSystem();
-
   // Session-only history: lives in memory, gone on restart. No persistence.
   const sessions = new Map<string, Message[]>();
 
@@ -185,7 +183,6 @@ export function createAI(opts: AIOptions): AI {
     }
     if (config.model !== undefined && config.model !== model) {
       model = config.model;
-      system = buildSystem();
       console.log(`[ai] model switched to: ${model}`);
     }
   }

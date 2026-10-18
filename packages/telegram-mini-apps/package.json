@@ -1,0 +1,13 @@
+{
+  "name": "@angellily/plugin-telegram-mini-apps",
+  "version": "0.0.3",
+  "description": "AI-generated Telegram Mini Apps (Canvas) for AngelLily",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

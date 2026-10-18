@@ -2,6 +2,14 @@
 import { createServer, type Server } from 'node:http';
 import type { Auth } from './auth.js';
 import { t } from './i18n.js';
+import {
+  serveMiniAppGet,
+  miniAppHealth,
+  validateInitData,
+} from './miniapp_serve.js';
+
+// Re-export for plugins/host code that imported it from here.
+export { validateInitData };
 
 const TG_LIMIT = 4096;
 const POLL_TIMEOUT = 25; // long polling timeout, seconds
@@ -71,16 +79,28 @@ export interface TelegramClient {
   ): Promise<CommandApproval>;
   /** Register bot commands via the Telegram setMyCommands API. */
   setMyCommands(commands: { command: string; description: string }[]): Promise<void>;
+  /** Send a Mini App open button (true web_app button when url is public HTTPS). */
+  sendMiniApp(chatId: number, title: string, url: string): Promise<void>;
+  /** Send a local file as a document (fallback when no public HTTPS is configured). */
+  sendDocument(chatId: number, filename: string, content: Buffer, mime?: string): Promise<void>;
+  /** Fire one typing indicator (never throws). Use in a loop for long work. */
+  sendTyping(chatId: number): Promise<void>;
 }
 
 interface TgChat {
   id: number;
 }
 
+interface TgWebAppData {
+  data: string;
+  button_text: string;
+}
+
 interface TgMessage {
   message_id: number;
   text?: string;
   chat: TgChat;
+  web_app_data?: TgWebAppData;
 }
 
 interface TgCallbackQuery {
@@ -154,6 +174,11 @@ function friendlyError(err: unknown): string {
   if (e?.code === 'ENOTFOUND') return t.errConn;
   return t.errGeneric;
 }
+
+// ---------- Telegram Mini Apps (WebApp) ----------
+// Static hosting lives in ./miniapp_serve.js (shared with the standalone
+// server in main.ts). Health + validate endpoints are registered on both
+// servers so tunnel checks and initData auth behave the same everywhere.
 
 // ---------- Bot API calls ----------
 
@@ -278,7 +303,16 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
   // Gate: only the verified owner (or the /verify flow) gets a response.
   async function handleMessage(msg: TgMessage): Promise<void> {
     const chatId = msg.chat.id;
-    const text = msg.text;
+    // Mini App -> bot channel: Telegram delivers sendData() as a service
+    // message with web_app_data and no text. Rephrase it as plain text so
+    // the AI (and plugin hooks) see it like a normal message. The payload
+    // itself is authenticated by Telegram (comes via Bot API, spoof-proof).
+    let text = msg.text;
+    if (!text && msg.web_app_data) {
+      const raw = msg.web_app_data.data ?? '';
+      console.log(`[miniapp] web_app_data from chat ${chatId} (${raw.length} chars)`);
+      text = `[miniapp] ${raw}`;
+    }
     if (!text) return;
     const { auth } = opts;
 
@@ -372,7 +406,7 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
 
     // Immediately trigger typing indicator, then keep alive until the answer is done.
     sendChatAction(token, chatId).catch(() => {});
-    const typer = (async () => {
+    void (async () => {
       while (!done) {
         await sleep(TYPING_INTERVAL);
         if (done) break;
@@ -425,7 +459,7 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
       return next;
     };
 
-    const updater = (async () => {
+    void (async () => {
       while (!done) {
         await sleep(UPDATE_INTERVAL);
         if (done) break;
@@ -558,6 +592,51 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
     return { approved: false, output: '' };
   }
 
+  // ---------- Mini App sender (web_app button + file fallback) ----------
+
+  /** One typing tick that never throws — callers loop it during long work. */
+  function sendTyping(chatId: number): Promise<void> {
+    return sendChatAction(token, chatId).catch(() => undefined);
+  }
+
+  async function sendMiniApp(chatId: number, title: string, url: string): Promise<void> {
+    const safe = title.trim().slice(0, 64) || 'Mini App';
+    try {
+      await post(token, 'sendMessage', {
+        chat_id: chatId,
+        text: safe,
+        reply_markup: JSON.stringify({
+          inline_keyboard: [[{ text: `Mở ${safe}`, web_app: { url } }]],
+        }),
+      });
+      console.log(`[miniapp] button sent to chat ${chatId}: ${url}`);
+    } catch (err) {
+      console.error('[telegram] sendMiniApp failed, falling back to link:', err);
+      await sendSafe(chatId, `${safe}\n${url}`, 'HTML');
+    }
+  }
+
+  async function sendDocument(chatId: number, filename: string, content: Buffer, mime = 'text/html'): Promise<void> {
+    try {
+      const boundary = `----lily${Date.now()}`;
+      const head =
+        `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n` +
+        `--${boundary}\r\nContent-Disposition: form-data; name="document"; filename="${filename}"\r\nContent-Type: ${mime}\r\n\r\n`;
+      const tail = `\r\n--${boundary}--\r\n`;
+      const body = Buffer.concat([Buffer.from(head), content, Buffer.from(tail)]);
+      const res = await fetch(api(token, 'sendDocument'), {
+        method: 'POST',
+        headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+        body: body as unknown as BodyInit,
+      });
+      const data = (await res.json()) as TgResponse<unknown>;
+      if (!data.ok) throw new Error(`sendDocument failed: ${data.description ?? res.status}`);
+    } catch (err) {
+      console.error('[telegram] sendDocument failed:', err);
+      await sendSafe(chatId, t.errGeneric);
+    }
+  }
+
   // Per-chat task chains: messages from the same chat run one after another,
   // different chats run in parallel. This keeps the poll loop free so button
   // callbacks are always processed promptly, even mid-answer.
@@ -582,7 +661,7 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
     }
     const msg = update.message;
     if (msg) {
-      if (opts.auth.isOwner(msg.chat.id) && msg.text && !msg.text.startsWith('/')) {
+      if (opts.auth.isOwner(msg.chat.id) && (msg.web_app_data || (msg.text && !msg.text.startsWith('/')))) {
         sendChatAction(token, msg.chat.id);
       }
       enqueueMessage(msg.chat.id, () => handleMessage(msg));
@@ -633,6 +712,42 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
     }
 
     server = createServer((req, res) => {
+      // Mini App hosting (plan A: reuse webhook server, zero extra port).
+      // Static GET is public by id (unguessable 8-hex); writes/API auth happen
+      // via validateInitData (POST /miniapp/validate) + web_app_data via Bot API.
+      const reqUrl = req.url ?? '/';
+      if (req.method === 'GET' && reqUrl.startsWith('/miniapp/')) {
+        if (reqUrl === '/miniapp/health' || reqUrl.startsWith('/miniapp/health?')) {
+          res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(miniAppHealth()));
+          return;
+        }
+        if (serveMiniAppGet(reqUrl, res)) return;
+        res.writeHead(404, { 'Content-Type': 'text/plain' }).end('Not found');
+        return;
+      }
+
+      // initData check for future Mini App API calls (owner-only + initData).
+      if (req.method === 'POST' && (reqUrl === '/miniapp/validate' || reqUrl.startsWith('/miniapp/validate?'))) {
+        let raw = '';
+        req.on('data', (chunk) => {
+          raw += chunk;
+          if (raw.length > 64 * 1024) req.destroy();
+        });
+        req.on('end', () => {
+          try {
+            const body = JSON.parse(raw || '{}') as { initData?: unknown };
+            const ok =
+              typeof body.initData === 'string' && body.initData
+                ? validateInitData(body.initData, token)
+                : false;
+            res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok }));
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: false }));
+          }
+        });
+        return;
+      }
+
       if (req.method !== 'POST') {
         res.writeHead(405).end('Method Not Allowed');
         return;
@@ -704,6 +819,9 @@ export function startTelegram(opts: TelegramOptions): TelegramClient {
       }
     },
     requestApproval,
+    sendMiniApp,
+    sendDocument,
+    sendTyping,
     async setMyCommands(commands: { command: string; description: string }[]): Promise<void> {
       try {
         await post(token, 'setMyCommands', { commands });

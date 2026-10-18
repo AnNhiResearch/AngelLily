@@ -8,6 +8,13 @@ import { t } from './i18n.js';
 import { loadPlugins } from './plugins.js';
 import { createShell } from './shell.js';
 import { startTelegram, type TelegramClient } from './telegram.js';
+import {
+  serveMiniAppGet,
+  miniAppHealth,
+  validateInitData,
+  miniappBaseUrl,
+  miniappPublicUrl,
+} from './miniapp_serve.js';
 
 // CLI flag handling
 const args = process.argv.slice(2);
@@ -106,6 +113,36 @@ const auth = createAuth();
 // right after startTelegram returns.
 let telegram: TelegramClient | null = null;
 
+// ---------- Telegram Mini Apps host (plans A + B + C) ----------
+// A: webhook server in telegram.ts serves GET /miniapp/<id>/ (zero extra port).
+// B: MINIAPP_PORT>0 starts a tiny standalone server here (any transport) —
+//    expose it with a tunnel and set MINIAPP_PUBLIC_URL to the tunnel URL.
+//    Polling-friendly, Termux/NAT-friendly, no extra dependencies.
+// C: no public HTTPS -> sendButton falls back to sending index.html as a file.
+const miniappHost = {
+  getPublicUrl(appId: string): string | null {
+    return miniappPublicUrl(appId);
+  },
+  async sendButton(chatId: number, appId: string, title: string): Promise<void> {
+    const url = this.getPublicUrl(appId);
+    if (url && telegram) {
+      await telegram.sendMiniApp(chatId, title, url);
+      return;
+    }
+    // Fallback C: no HTTPS or telegram not ready — send single-file HTML.
+    try {
+      const file = resolve(process.cwd(), '.angellily', 'miniapp', appId, 'index.html');
+      if (telegram && existsSync(file)) {
+        await telegram.sendDocument(chatId, `${appId}.html`, readFileSync(file), 'text/html');
+        return;
+      }
+    } catch (err) {
+      console.warn(`[miniapp] file fallback failed for ${appId}:`, err);
+    }
+    console.warn(`[miniapp] no public URL and no file fallback for ${appId}`);
+  },
+};
+
 // Deferred AI controller proxy: plugins load before createAI(), but in-process
 // plugins (e.g. ai-gateway) need setConfig/getConfig at command time, which is
 // always after ai is initialized. The proxy forwards calls to the real AI once
@@ -124,6 +161,7 @@ const aiProxy = {
 
 const plugins = await loadPlugins(process.cwd(), {
   ai: aiProxy,
+  miniapp: miniappHost,
   onShellRequest: async (pluginName, command, chatId) => {
     if (!telegram) return { ok: false, output: 'Telegram not ready' };
     const approval = await telegram.requestApproval(
@@ -154,12 +192,19 @@ const ai = createAI({
   system: `${loadSystemPrompt()}\n\nUnderlying model: ${process.env.OPENAI_MODEL ?? 'gpt-4o-mini'}.`,
   environment: shell.describe(),
   extraSystemPrompt: () => plugins.systemPrompt() || '',
-  runCommand: (sessionId, command) => {
+  runCommand: async (sessionId, command) => {
     const chatId = Number(sessionId);
     const finalCommand = plugins.applyShellCommand(command, { chatId, locale });
-    return telegram
-      ? telegram.requestApproval(chatId, finalCommand)
-      : Promise.resolve({ approved: false, output: '' });
+    const keepTyping = setInterval(() => {
+      telegram?.sendTyping(chatId).catch(() => {});
+    }, 2500);
+    try {
+      return telegram
+        ? await telegram.requestApproval(chatId, finalCommand)
+        : { approved: false, output: '' };
+    } finally {
+      clearInterval(keepTyping);
+    }
   },
   tools: () => [
     {
@@ -170,6 +215,13 @@ const ai = createAI({
   ],
   runTool: async (sessionId, name, input) => {
     const chatId = Number(sessionId);
+    // Streaming stalls while a tool runs (tool exec, approval wait, next
+    // first token) and clients would otherwise show a dead bot — keep the
+    // typing indicator alive until the tool round resolves.
+    const keepTyping = setInterval(() => {
+      telegram?.sendTyping(chatId).catch(() => {});
+    }, 2500);
+    try {
     if (name === 'inspect_plugins') {
       if (!telegram) return { approved: false, output: '' };
       return await telegram.requestApproval(
@@ -202,6 +254,7 @@ const ai = createAI({
     const toolCtx = {
       chatId,
       locale,
+      miniapp: miniappHost,
     };
     try {
       if (tool.approval) {
@@ -221,6 +274,9 @@ const ai = createAI({
       console.error(`[plugins] tool ${name} failed:`, err);
       return { approved: true, output: t.toolError((err as Error).message) };
     }
+    } finally {
+      clearInterval(keepTyping);
+    }
   },
 });
 
@@ -228,12 +284,63 @@ const ai = createAI({
 realAI = ai;
 
 // Initialize plugins (e.g. ai-gateway loads active provider/account/model from gateways.json)
-await plugins.init({ chatId: 0, locale, ai: aiProxy });
+await plugins.init({ chatId: 0, locale, ai: aiProxy, miniapp: miniappHost });
 
 const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL;
 const webhookPort = Number(process.env.TELEGRAM_WEBHOOK_PORT) || 3000;
 const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
 const transportMode = process.env.TELEGRAM_TRANSPORT === 'polling' ? 'polling' : (webhookUrl ? 'webhook' : 'polling');
+
+// Plan B (full): standalone Mini App server. Runs whenever MINIAPP_PORT>0,
+// on ANY transport — polling (no webhook server exists) or webhook (split
+// traffic: Telegram updates on webhook port, Mini Apps on this port).
+// Same routes as the webhook server: GET /miniapp/<id>/, GET /miniapp/health,
+// POST /miniapp/validate. Expose with a tunnel, set MINIAPP_PUBLIC_URL.
+const miniappPort = Number(process.env.MINIAPP_PORT) || 0;
+if (miniappPort > 0) {
+  const { createServer: createMiniServer } = await import('node:http');
+  createMiniServer((req, res) => {
+    const url = req.url ?? '/';
+    if (req.method === 'GET' && (url === '/miniapp/health' || url.startsWith('/miniapp/health?'))) {
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(miniAppHealth()));
+      return;
+    }
+    if (req.method === 'POST' && (url === '/miniapp/validate' || url.startsWith('/miniapp/validate?'))) {
+      let raw = '';
+      req.on('data', (chunk) => {
+        raw += chunk;
+        if (raw.length > 64 * 1024) req.destroy();
+      });
+      req.on('end', () => {
+        try {
+          const body = JSON.parse(raw || '{}') as { initData?: unknown };
+          const ok =
+            typeof body.initData === 'string' && body.initData
+              ? validateInitData(body.initData, token)
+              : false;
+          res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok }));
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: false }));
+        }
+      });
+      return;
+    }
+    if (req.method === 'GET' && url.startsWith('/miniapp/')) {
+      if (serveMiniAppGet(url, res)) return;
+      res.writeHead(404).end('Not found');
+      return;
+    }
+    res.writeHead(404).end('Not found');
+  }).listen(miniappPort, () => {
+    const pub = miniappBaseUrl();
+    console.log(`[miniapp] standalone server on port ${miniappPort}`);
+    if (pub) {
+      console.log(`[miniapp] public base: ${pub} (transport=${transportMode})`);
+    } else {
+      console.log('[miniapp] set MINIAPP_PUBLIC_URL to your tunnel URL to enable web_app buttons (e.g. https://<tunnel>/miniapp/<id>/)');
+    }
+  });
+}
 
 telegram = startTelegram({
   token,
@@ -274,6 +381,7 @@ telegram = startTelegram({
       return await match.command.run(match.args, {
         chatId,
         locale,
+        miniapp: miniappHost,
       });
     } catch (err) {
       console.error(`[plugins] command ${text} failed:`, err);
@@ -302,6 +410,7 @@ console.log(`Model: ${currentConfig.model}`);
 console.log(`Base URL: ${currentConfig.baseURL ?? 'https://api.openai.com/v1'}`);
 console.log(`Shell environment: ${shell.describe()}`);
 console.log(`Plugins: ${plugins.names.length ? plugins.names.join(', ') : '(none)'}`);
+console.log(`Mini Apps: ${miniappBaseUrl() ?? '(no public URL — file fallback mode)'}`);
 
 // Register bot commands with Telegram (built-in + plugin commands)
 const builtinCommands = [

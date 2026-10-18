@@ -1,6 +1,6 @@
 {
   "name": "@angellily/app",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A featherweight autonomous Telegram agent (Angel Lily)",
   "type": "module",
   "main": "dist/main.js",
@@ -16,7 +16,8 @@
     ".env.example"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && esbuild src/main.ts --bundle --platform=node --format=esm --target=node22 --packages=external --minify --tree-shaking=true --outfile=dist/main.js && esbuild src/plugin_runner.ts --bundle --platform=node --format=esm --target=node22 --packages=external --minify --tree-shaking=true --outfile=dist/plugin_runner.js",
+    "build-full": "npm install && npm run build && npm --prefix packages/ai-gateway install && npm --prefix packages/ai-gateway run build && npm --prefix packages/telegram-mini-apps install && npm --prefix packages/telegram-mini-apps run build && npm --prefix packages/tunnel install && npm --prefix packages/tunnel run build",
     "start": "node --env-file=.env dist/main.js",
     "dev": "tsc --watch",
     "prepublishOnly": "npm run build"
@@ -46,6 +47,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.5.4"
   },
   "engines": {
